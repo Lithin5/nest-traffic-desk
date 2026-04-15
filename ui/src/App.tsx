@@ -1,56 +1,81 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { JsonViewer } from "./components/JsonViewer";
+import { TabbedJsonViewer } from "./components/TabbedJsonViewer";
+import { Paginator } from "./components/Paginator";
+import { StatsBar } from "./components/StatsBar";
 import { FilterState, TrafficDeskConfig, TrafficLogEntry } from "./types";
 
 const ALL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
+const DEFAULT_FILTERS: FilterState = {
+  q: "",
+  methods: [],
+  status: "",
+  direction: "all",
+  durationMin: 0,
+  durationMax: 0,
+};
 
-function methodClass(method: string): string {
+function methodClass(method: string) {
   return `method-pill method-${method.toLowerCase()}`;
 }
-
-function statusClass(statusCode: number): string {
+function statusClass(statusCode: number) {
   return `status-pill status-${Math.floor(statusCode / 100)}xx`;
+}
+function chipClass(method: string, active: boolean) {
+  return `chip chip-${method.toLowerCase()}${active ? " active" : ""}`;
+}
+function durationClass(ms: number) {
+  if (ms >= 2000) return "duration-cell duration-very-slow";
+  if (ms >= 800) return "duration-cell duration-slow";
+  return "duration-cell";
 }
 
 function matchesFilters(entry: TrafficLogEntry, filters: FilterState): boolean {
   const q = filters.q.trim().toLowerCase();
-  if (q && !entry.path.toLowerCase().includes(q)) {
-    return false;
-  }
+  if (q && !entry.path.toLowerCase().includes(q)) return false;
 
-  if (filters.methods.length > 0 && !filters.methods.includes(entry.method.toUpperCase())) {
+  if (filters.methods.length > 0 && !filters.methods.includes(entry.method.toUpperCase()))
     return false;
-  }
 
   if (filters.status.trim().length > 0) {
-    const status = filters.status.trim().toLowerCase();
-    if (/^\dxx$/.test(status)) {
-      if (Math.floor(entry.statusCode / 100) !== Number(status[0])) {
-        return false;
-      }
-    } else if (/^\d{3}$/.test(status)) {
-      if (entry.statusCode !== Number(status)) {
-        return false;
-      }
+    const s = filters.status.trim().toLowerCase();
+    if (/^\dxx$/.test(s)) {
+      if (Math.floor(entry.statusCode / 100) !== Number(s[0])) return false;
+    } else if (/^\d{3}$/.test(s)) {
+      if (entry.statusCode !== Number(s)) return false;
     }
   }
+
+  if (filters.direction !== "all" && entry.direction !== filters.direction) return false;
+
+  if (filters.durationMin > 0 && entry.durationMs < filters.durationMin) return false;
+  if (filters.durationMax > 0 && entry.durationMs > filters.durationMax) return false;
 
   return true;
 }
 
 async function fetchConfig(): Promise<TrafficDeskConfig> {
-  const response = await fetch("./config");
-  if (!response.ok) {
-    throw new Error("Failed to load UI configuration.");
-  }
-  return response.json();
+  const res = await fetch("./config");
+  if (!res.ok) throw new Error("Failed to load UI configuration.");
+  return res.json();
 }
+
+function exportLogs(logs: TrafficLogEntry[]) {
+  const blob = new Blob([JSON.stringify(logs, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `traffic-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+const SKELETON_ROWS = 6;
 
 export function App() {
   const [config, setConfig] = useState<TrafficDeskConfig | null>(null);
   const [allLogs, setAllLogs] = useState<TrafficLogEntry[]>([]);
-  const [filters, setFilters] = useState<FilterState>({ q: "", methods: [], status: "" });
+  const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sort, setSort] = useState<"desc" | "asc">("desc");
   const [isLoading, setIsLoading] = useState(true);
@@ -58,32 +83,59 @@ export function App() {
     "reconnecting"
   );
   const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  const [theme, setTheme] = useState<"light" | "dark">(
+    () => (localStorage.getItem("td-theme") as "light" | "dark") ?? "light"
+  );
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("td-theme", theme);
+  }, [theme]);
+
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+
+  const sortRef = useRef(sort);
+  sortRef.current = sort;
+
+  // Keyboard navigation
+  const filteredLogsRef = useRef<TrafficLogEntry[]>([]);
 
   useEffect(() => {
     let socket: Socket | null = null;
+    let cancelled = false;
 
     (async () => {
       try {
         const loadedConfig = await fetchConfig();
+        if (cancelled) return;
         setConfig(loadedConfig);
-        const dataResponse = await fetch(`${loadedConfig.dataPath}?sort=desc`);
-        const data = await dataResponse.json();
+        const dataRes = await fetch(`${loadedConfig.dataPath}?sort=desc`);
+        const data = await dataRes.json();
+        if (cancelled) return;
         setAllLogs(data.items ?? []);
         setIsLoading(false);
 
-        socket = io(loadedConfig.websocketNamespace || "/", {
-          transports: ["websocket", "polling"],
+        const ns = (loadedConfig.websocketNamespace || "/").trim() || "/";
+        const socketOpts = {
+          transports: ["websocket", "polling"] as const,
+          path: "/socket.io",
           reconnection: true,
           reconnectionAttempts: Infinity,
           reconnectionDelay: 750,
           reconnectionDelayMax: 5000,
           randomizationFactor: 0.25
-        });
+        };
 
-        socket.on("connect", () => {
-          setConnectionState("connected");
-          setReconnectAttempt(0);
-        });
+        // Default namespace: use io(opts) so the client resolves the page origin (not io("/"), which
+        // socket.io-client parses via a special URL path and can misbehave on some hosts).
+        socket = ns === "/" ? io(socketOpts) : io(ns, socketOpts);
+
+        socket.on("connect", () => { setConnectionState("connected"); setReconnectAttempt(0); });
         socket.on("disconnect", () => setConnectionState("reconnecting"));
         socket.io.on("reconnect_attempt", (attempt) => {
           setConnectionState("reconnecting");
@@ -91,10 +143,19 @@ export function App() {
         });
         socket.on("connect_error", () => setConnectionState("error"));
         socket.on("traffic:snapshot", (snapshot: TrafficLogEntry[]) => {
-          setAllLogs(snapshot ?? []);
+          if (!pausedRef.current) setAllLogs(snapshot ?? []);
         });
         socket.on("traffic:new", (entry: TrafficLogEntry) => {
-          setAllLogs((prev) => [entry, ...prev]);
+          if (!pausedRef.current) {
+            setAllLogs((prev) => [entry, ...prev]);
+            setNewIds((prev) => {
+              const next = new Set(prev);
+              next.add(entry.id);
+              setTimeout(() => setNewIds((s) => { const n = new Set(s); n.delete(entry.id); return n; }), 600);
+              return next;
+            });
+            if (sortRef.current === "desc") setPage(1);
+          }
         });
       } catch {
         setConnectionState("error");
@@ -103,12 +164,13 @@ export function App() {
     })();
 
     return () => {
-      socket?.close();
+      cancelled = true;
+      socket?.disconnect();
     };
   }, []);
 
   const filteredLogs = useMemo(() => {
-    const rows = allLogs.filter((entry) => matchesFilters(entry, filters));
+    const rows = allLogs.filter((e) => matchesFilters(e, filters));
     rows.sort((a, b) => {
       const delta = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
       return sort === "asc" ? delta : -delta;
@@ -116,59 +178,162 @@ export function App() {
     return rows;
   }, [allLogs, filters, sort]);
 
+  filteredLogsRef.current = filteredLogs;
+
+  // Reset to page 1 on filter/sort change
+  useEffect(() => { setPage(1); }, [filters, sort]);
+
+  // Deselect if filtered out
   useEffect(() => {
-    if (selectedId && !filteredLogs.some((row) => row.id === selectedId)) {
-      setSelectedId(null);
-    }
+    if (selectedId && !filteredLogs.some((r) => r.id === selectedId)) setSelectedId(null);
   }, [filteredLogs, selectedId]);
 
-  const selectedLog = filteredLogs.find((entry) => entry.id === selectedId) ?? null;
+  // Paginated slice
+  const pagedLogs = useMemo(() => {
+    if (pageSize === 0) return filteredLogs;
+    const start = (page - 1) * pageSize;
+    return filteredLogs.slice(start, start + pageSize);
+  }, [filteredLogs, page, pageSize]);
+
+  const selectedLog = filteredLogs.find((e) => e.id === selectedId) ?? null;
+
+  // Keyboard navigation
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      const logs = filteredLogsRef.current;
+      if (e.key === "Escape") { setSelectedId(null); return; }
+      if (e.key === "c" || e.key === "C") {
+        if (selectedId) {
+          const entry = logs.find((l) => l.id === selectedId);
+          if (entry) navigator.clipboard.writeText(JSON.stringify(entry, null, 2));
+        }
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const idx = logs.findIndex((l) => l.id === selectedId);
+        const next = e.key === "ArrowDown"
+          ? Math.min(logs.length - 1, idx + 1)
+          : Math.max(0, idx - 1);
+        if (next >= 0 && next < logs.length) setSelectedId(logs[next].id);
+      }
+    },
+    [selectedId]
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
+
+  function clearLogs() {
+    setAllLogs([]);
+    setSelectedId(null);
+    setPage(1);
+  }
+
+  function toggleMethod(method: string) {
+    setFilters((f) => ({
+      ...f,
+      methods: f.methods.includes(method)
+        ? f.methods.filter((m) => m !== method)
+        : [...f.methods, method],
+    }));
+  }
 
   return (
     <div className="app-shell">
+      {/* ── Top Bar ── */}
       <header className="topbar">
-        <div>
-          <h1>Traffic Desk</h1>
-          <p>Live HTTP request stream for your NestJS app</p>
+        <div className="topbar-left">
+          <div className="logo-badge">🚦</div>
+          <div className="topbar-meta">
+            <h1>Traffic Desk</h1>
+            <p>Live HTTP request stream for your NestJS app</p>
+          </div>
+          <StatsBar logs={allLogs} />
         </div>
-        <div className={`ws-state ws-${connectionState}`}>
-          <span className="status-dot" />
-          {connectionState === "connected" && "Connected"}
-          {connectionState === "reconnecting" &&
-            `Reconnecting${reconnectAttempt > 0 ? ` (attempt ${reconnectAttempt})` : ""}`}
-          {connectionState === "error" && "Connection error"}
+
+        <div className="topbar-right">
+          {paused && (
+            <span className="paused-badge">⏸ Paused</span>
+          )}
+          <button
+            id="btn-pause"
+            type="button"
+            className={`topbar-btn${paused ? " topbar-btn--active" : ""}`}
+            onClick={() => setPaused((v) => !v)}
+            title={paused ? "Resume live updates" : "Pause live updates"}
+          >
+            {paused ? "▶ Resume" : "⏸ Pause"}
+          </button>
+          <button
+            id="btn-export"
+            type="button"
+            className="topbar-btn"
+            onClick={() => exportLogs(filteredLogs)}
+            title="Export filtered logs as JSON"
+          >
+            ⬇ Export
+          </button>
+          <button
+            id="btn-clear"
+            type="button"
+            className="topbar-btn topbar-btn--danger"
+            onClick={clearLogs}
+            title="Clear all logs"
+          >
+            🗑 Clear
+          </button>
+          <button
+            id="btn-theme"
+            type="button"
+            className="topbar-btn"
+            onClick={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
+            title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+          >
+            {theme === "light" ? "☾ Dark" : "☀ Light"}
+          </button>
+          <div className={`ws-state ws-${connectionState}`}>
+            <span className="status-dot" />
+            {connectionState === "connected" && "Live"}
+            {connectionState === "reconnecting" &&
+              `Reconnecting${reconnectAttempt > 0 ? ` #${reconnectAttempt}` : ""}`}
+            {connectionState === "error" && "Error"}
+          </div>
         </div>
       </header>
 
+      {/* ── Filter Bar ── */}
       <section className="filter-bar" aria-label="Log filters">
-        <label>
+        {/* Search */}
+        <label className="filter-label">
           Search path
-          <input
-            type="search"
-            placeholder="Search path..."
-            value={filters.q}
-            onChange={(e) => setFilters((current) => ({ ...current, q: e.target.value }))}
-          />
+          <div className="input-wrapper">
+            <span className="input-icon">🔍</span>
+            <input
+              id="filter-search"
+              type="search"
+              placeholder="Filter by path..."
+              value={filters.q}
+              onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
+            />
+          </div>
         </label>
 
-        <div className="method-group">
-          <span>Methods</span>
+        {/* Methods */}
+        <div className="filter-label method-group">
+          Methods
           <div className="chips">
             {ALL_METHODS.map((method) => {
               const active = filters.methods.includes(method);
               return (
                 <button
                   key={method}
+                  id={`chip-${method.toLowerCase()}`}
                   type="button"
-                  className={active ? "chip active" : "chip"}
-                  onClick={() =>
-                    setFilters((current) => ({
-                      ...current,
-                      methods: active
-                        ? current.methods.filter((item) => item !== method)
-                        : [...current.methods, method]
-                    }))
-                  }
+                  className={chipClass(method, active)}
+                  onClick={() => toggleMethod(method)}
                 >
                   {method}
                 </button>
@@ -177,103 +342,220 @@ export function App() {
           </div>
         </div>
 
-        <label>
+        {/* Status */}
+        <label className="filter-label">
           Status
-          <input
-            type="text"
-            inputMode="numeric"
-            placeholder="All statuses (e.g. 4xx, 500)"
-            value={filters.status}
-            onChange={(e) => setFilters((current) => ({ ...current, status: e.target.value }))}
-          />
+          <div className="input-wrapper">
+            <span className="input-icon">🔢</span>
+            <input
+              id="filter-status"
+              type="text"
+              inputMode="numeric"
+              placeholder="e.g. 4xx, 500"
+              value={filters.status}
+              onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
+            />
+          </div>
         </label>
 
-        <button
-          type="button"
-          className="clear-btn"
-          onClick={() => setFilters({ q: "", methods: [], status: "" })}
-        >
-          Clear filters
-        </button>
+        {/* Direction */}
+        <div className="filter-label direction-group">
+          Direction
+          <div className="dir-toggle">
+            {(["all", "incoming", "outgoing"] as const).map((d) => (
+              <button
+                key={d}
+                id={`dir-${d}`}
+                type="button"
+                className={`dir-btn${filters.direction === d ? " active" : ""}`}
+                onClick={() => setFilters((f) => ({ ...f, direction: d }))}
+              >
+                {d === "all" ? "All" : d === "incoming" ? "↓ In" : "↑ Out"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="filter-actions">
+          <button
+            id="btn-sort"
+            type="button"
+            className="ghost-btn"
+            onClick={() => setSort((s) => (s === "asc" ? "desc" : "asc"))}
+          >
+            {sort === "asc" ? "↑ Oldest" : "↓ Newest"}
+          </button>
+          <button
+            id="btn-clear-filters"
+            type="button"
+            className="clear-btn"
+            onClick={() => setFilters(DEFAULT_FILTERS)}
+          >
+            ✕ Clear
+          </button>
+        </div>
       </section>
 
-      <section className="result-bar">
-        Showing {filteredLogs.length} of {allLogs.length} logs
-        <button
-          type="button"
-          className="ghost-btn"
-          onClick={() => setSort((current) => (current === "asc" ? "desc" : "asc"))}
-        >
-          Sort: {sort === "asc" ? "Oldest first" : "Newest first"}
-        </button>
-      </section>
+      {/* ── Result Bar ── */}
+      <div className="result-bar">
+        <span>
+          {filteredLogs.length === allLogs.length
+            ? `${allLogs.length} logs`
+            : `${filteredLogs.length} of ${allLogs.length} logs`}
+        </span>
+        <span style={{ fontSize: "0.72rem", opacity: 0.55 }}>
+          ↑ ↓ navigate · Esc close · C copy
+        </span>
+      </div>
 
+      {/* ── Workspace ── */}
       <main className="workspace">
+        {/* Log Table */}
         <section className="table-wrap" aria-live="polite">
-          {isLoading && <div className="empty-state">Loading logs...</div>}
-          {!isLoading && filteredLogs.length === 0 && (
-            <div className="empty-state">No logs match your filters.</div>
-          )}
-          {!isLoading && filteredLogs.length > 0 && (
+          {isLoading ? (
             <table>
               <thead>
                 <tr>
                   <th>Time</th>
                   <th>Method</th>
-                  <th>Direction</th>
+                  <th>Dir</th>
                   <th>Path</th>
                   <th>Status</th>
                   <th>Duration</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredLogs.map((entry) => (
-                  <tr
-                    key={entry.id}
-                    className={entry.id === selectedId ? "selected-row" : ""}
-                    onClick={() => setSelectedId(entry.id)}
-                  >
-                    <td>{new Date(entry.timestamp).toLocaleTimeString()}</td>
-                    <td>
-                      <span className={methodClass(entry.method)}>{entry.method}</span>
-                    </td>
-                    <td>{entry.direction}</td>
-                    <td className="path-cell">{entry.path}</td>
-                    <td>
-                      <span className={statusClass(entry.statusCode)}>{entry.statusCode}</span>
-                    </td>
-                    <td>{entry.durationMs} ms</td>
+                {Array.from({ length: SKELETON_ROWS }).map((_, i) => (
+                  <tr key={i} className="skeleton-row">
+                    {[60, 54, 48, 200, 54, 60].map((w, j) => (
+                      <td key={j}>
+                        <div className="skeleton-cell" style={{ width: w }} />
+                      </td>
+                    ))}
                   </tr>
                 ))}
               </tbody>
             </table>
+          ) : filteredLogs.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">📭</div>
+              <div>{allLogs.length === 0 ? "No logs yet. Waiting for traffic…" : "No logs match your filters."}</div>
+            </div>
+          ) : (
+            <>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Method</th>
+                    <th>Dir</th>
+                    <th>Path</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pagedLogs.map((entry) => (
+                    <tr
+                      key={entry.id}
+                      id={`row-${entry.id}`}
+                      className={[
+                        entry.id === selectedId ? "selected-row" : "",
+                        newIds.has(entry.id) ? "row-new" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      onClick={() => setSelectedId(entry.id)}
+                    >
+                      <td style={{ whiteSpace: "nowrap", fontSize: "0.77rem", color: "var(--text-muted)" }}>
+                        {new Date(entry.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td>
+                        <span className={methodClass(entry.method)}>{entry.method}</span>
+                      </td>
+                      <td>
+                        <span className={`dir-pill dir-pill-${entry.direction === "incoming" ? "in" : "out"}`}>
+                          {entry.direction === "incoming" ? "↓" : "↑"}
+                        </span>
+                      </td>
+                      <td className="path-cell">{entry.path}</td>
+                      <td>
+                        <span className={statusClass(entry.statusCode)}>{entry.statusCode}</span>
+                      </td>
+                      <td className={durationClass(entry.durationMs)}>
+                        {entry.durationMs} ms
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <Paginator
+                page={page}
+                pageSize={pageSize}
+                total={filteredLogs.length}
+                onPage={setPage}
+                onPageSize={(s) => { setPageSize(s); setPage(1); }}
+              />
+            </>
           )}
         </section>
 
+        {/* Detail Pane */}
         <aside className="details-pane">
-          {!selectedLog && <div className="empty-state">Select a row to inspect full details.</div>}
-          {selectedLog && (
+          {!selectedLog ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">👆</div>
+              <div>Select a row to inspect full details.</div>
+              <div style={{ fontSize: "0.72rem" }}>Tip: use ↑ ↓ keys to navigate rows</div>
+            </div>
+          ) : (
             <>
               <div className="detail-head">
-                <h3>{selectedLog.method} {selectedLog.path}</h3>
-                <p>
-                  <span>{selectedLog.direction}</span>
-                  <span>{new Date(selectedLog.timestamp).toLocaleString()}</span>
-                  <span>{selectedLog.durationMs} ms</span>
-                  <span>Status {selectedLog.statusCode}</span>
-                </p>
+                <div className="detail-head-top">
+                  <h3>
+                    <span className={methodClass(selectedLog.method)} style={{ marginRight: "0.5rem" }}>
+                      {selectedLog.method}
+                    </span>
+                    {selectedLog.path}
+                  </h3>
+                  <button
+                    type="button"
+                    className="detail-close"
+                    onClick={() => setSelectedId(null)}
+                    title="Close (Esc)"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="detail-meta">
+                  <span className="detail-meta-item">
+                    <span className={statusClass(selectedLog.statusCode)}>{selectedLog.statusCode}</span>
+                  </span>
+                  <span className="detail-meta-item">{selectedLog.direction === "incoming" ? "↓ Incoming" : "↑ Outgoing"}</span>
+                  <span className="detail-meta-item">{selectedLog.durationMs} ms</span>
+                  <span className="detail-meta-item">{new Date(selectedLog.timestamp).toLocaleString()}</span>
+                  {selectedLog.remoteAddress && (
+                    <span className="detail-meta-item">🌐 {selectedLog.remoteAddress}</span>
+                  )}
+                </div>
               </div>
 
-              <JsonViewer data={selectedLog.requestHeaders} title="Request Headers" />
-              <JsonViewer data={selectedLog.requestBody ?? { message: "Not captured" }} title="Request Body" />
-              <JsonViewer data={selectedLog.responseBody ?? { message: "Not captured" }} title="Response Body" />
+              <TabbedJsonViewer
+                sections={[
+                  { title: "Request Headers", data: selectedLog.requestHeaders },
+                  { title: "Request Body", data: selectedLog.requestBody ?? { message: "Not captured" } },
+                  { title: "Response Body", data: selectedLog.responseBody ?? { message: "Not captured" } },
+                ]}
+              />
             </>
           )}
         </aside>
       </main>
 
       {!config && !isLoading && (
-        <div className="empty-state danger">
+        <div className="danger">
           Dashboard configuration endpoint is unavailable.
         </div>
       )}

@@ -8,8 +8,6 @@ if (!element) {
   throw new Error("Root element not found");
 }
 
-createRoot(element).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+// StrictMode double-mounts in dev and tears down the Socket.IO connection; that races with
+// live `traffic:new` events. This dashboard is a dev/ops tool — single mount keeps WS stable.
+createRoot(element).render(<App />);

@@ -1,147 +1,256 @@
 # nest-traffic-desk
 
-`nest-traffic-desk` is a NestJS module that captures HTTP traffic and ships a React dashboard with live updates.
+[![npm version](https://img.shields.io/npm/v/nest-traffic-desk?color=6366f1&style=flat-square)](https://www.npmjs.com/package/nest-traffic-desk)
+[![npm downloads](https://img.shields.io/npm/dm/nest-traffic-desk?color=6366f1&style=flat-square)](https://www.npmjs.com/package/nest-traffic-desk)
+[![license](https://img.shields.io/npm/l/nest-traffic-desk?color=6366f1&style=flat-square)](https://github.com/accodesk/nest-traffic-desk/blob/main/LICENSE)
+[![NestJS](https://img.shields.io/badge/NestJS-10%20%7C%2011-e0234e?style=flat-square)](https://nestjs.com)
 
-## Features (Phase 1-4)
+A plug-and-play NestJS module that captures every inbound and outbound HTTP request and serves a live dashboard — directly from your running application. Zero configuration required to get started.
 
-- Global interceptor for inbound HTTP requests.
-- In-memory bounded store (ring-style behavior via max entry cap).
-- REST data endpoint with filtering.
-- WebSocket push for realtime rows.
-- Hardened realtime UX:
-  - snapshot on connect
-  - reconnect/backoff status visible in UI
-  - stable event contract (`traffic:snapshot`, `traffic:new`)
-- Optional outgoing HTTP capture (global `fetch`) with `direction: "outgoing"` entries.
-- Pluggable storage:
-  - default in-memory ring buffer
-  - file-backed JSONL store with rotation and restart persistence
-  - custom store via `storeFactory`
-- React SPA dashboard (served by Nest) with:
-  - path search
-  - method multi-select
-  - status filter (`4xx`, `500`, etc.)
-  - clear filters
-  - split list/detail inspector
-  - JSON detail cards with copy buttons
-  - direction column (`incoming` / `outgoing`)
+---
 
-## Install
+## Overview
+
+`nest-traffic-desk` registers a global interceptor, a REST data endpoint, and a WebSocket gateway in your NestJS app. A built-in React SPA (served by Nest itself) connects to the WebSocket and renders an inspectable, filterable log of all HTTP traffic in real time.
+
+**Key capabilities**
+
+- Live request stream via WebSocket with automatic reconnection
+- Captures incoming and outgoing HTTP traffic in a unified view
+- Collapsible JSON inspector for request/response headers and bodies
+- Filterable by path, HTTP method, status code, direction, and duration
+- Light and dark theme with local persistence
+- Pluggable storage: in-memory ring buffer or file-backed JSONL with rotation
+- Sensitive headers redacted by default
+- No extra process, no external service — runs inside your app
+
+---
+
+## Requirements
+
+- Node.js ≥ 18
+- NestJS 10 or 11
+- `@nestjs/platform-express` or `@nestjs/platform-fastify`
+- `@nestjs/websockets` and `@nestjs/platform-socket.io` peer dependencies
+
+---
+
+## Installation
 
 ```bash
-npm install nest-traffic-desk
+npm i nest-traffic-desk
 ```
 
-## Usage
+Install the required peer dependencies if they are not already in your project:
 
-```ts
-import { Module } from "@nestjs/common";
-import { NestTrafficDeskModule } from "nest-traffic-desk";
+```bash
+npm i @nestjs/websockets @nestjs/platform-socket.io
+```
+
+---
+
+## Quick Start
+
+Import and register the module in your root `AppModule`. The dashboard will be available at `/_logs` as soon as your app starts.
+
+```typescript
+import { Module } from '@nestjs/common';
+import { NestTrafficDeskModule } from 'nest-traffic-desk';
 
 @Module({
   imports: [
     NestTrafficDeskModule.register({
-      maxEntries: 1000,
-      uiBasePath: "/_logs",
-      dataPath: "/_logs/data"
-    })
-  ]
+      maxEntries: 500,
+    }),
+  ],
 })
 export class AppModule {}
 ```
 
+Start your app and open `http://localhost:3000/_logs` in a browser.
+
+---
+
 ## Configuration
 
-`NestTrafficDeskModule.register(options)`
+`NestTrafficDeskModule.register(options?: TrafficDeskModuleOptions)`
 
-- `enabled` (`true`): turn module on/off.
-- `maxEntries` (`1000`): in-memory cap.
-- `maxBodySizeBytes` (`16384`): body truncation threshold.
-- `captureRequestBody` (`true`)
-- `captureResponseBody` (`true`)
-- `redactHeaders` (`authorization,cookie,set-cookie,x-api-key`)
-- `enableOutgoingHttp` (`false`): patch global `fetch` and log outbound calls.
-- `uiBasePath` (`/_logs`)
-- `dataPath` (`/_logs/data`)
-- `uiDistPath` (`""`): custom absolute path to built SPA assets.
-- `enableUi` (`true`)
-- `enableWebsocket` (`true`)
-- `websocketNamespace` (`/`)
-- `ignorePaths` (`/_logs,/_logs/data,/socket.io`)
-- `storage` (default `{ type: "memory" }`):
-  - memory mode: `{ type: "memory" }`
-  - file mode: `{ type: "file", filePath, maxFileSizeBytes, maxFiles }`
-- `storeFactory`: custom store provider (`() => TrafficLogStore`).
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | `boolean` | `true` | Set to `false` to disable the module entirely. No routes, interceptors, or gateways are registered. |
+| `maxEntries` | `number` | `1000` | Maximum number of entries kept in memory or passed to the store. |
+| `maxBodySizeBytes` | `number` | `16384` | Request and response bodies are truncated at this byte limit. |
+| `captureRequestBody` | `boolean` | `true` | Whether to capture request bodies. |
+| `captureResponseBody` | `boolean` | `true` | Whether to capture response bodies. |
+| `redactHeaders` | `string[]` | `['authorization','cookie','set-cookie','x-api-key']` | Header names to redact from logs. Values are replaced with `[REDACTED]`. |
+| `enableOutgoingHttp` | `boolean` | `false` | Patch the global `fetch` to capture outbound HTTP calls. |
+| `uiBasePath` | `string` | `'/_logs'` | URL path where the dashboard SPA is served. |
+| `dataPath` | `string` | `'/_logs/data'` | URL path for the REST data endpoint. |
+| `enableUi` | `boolean` | `true` | Whether to serve the dashboard SPA. |
+| `enableWebsocket` | `boolean` | `true` | Whether to attach the Socket.IO gateway. |
+| `websocketNamespace` | `string` | `'/'` | Socket.IO namespace for the live feed. |
+| `ignorePaths` | `string[]` | `['/_logs','/_logs/data','/socket.io']` | Paths excluded from traffic capture. |
+| `storage` | `TrafficDeskStorageOptions` | `{ type: 'memory' }` | Storage backend. See [Storage](#storage) below. |
+| `storeFactory` | `() => TrafficLogStore` | — | Factory for a fully custom store implementation. Takes precedence over `storage`. |
+| `uiDistPath` | `string` | `''` | Absolute path to a custom-built SPA asset directory. Leave empty to use the bundled UI. |
 
-### File Storage Example
+---
 
-```ts
+## Storage
+
+### In-Memory (default)
+
+The default ring buffer keeps the most recent `maxEntries` entries in memory. Data is lost on process restart.
+
+```typescript
 NestTrafficDeskModule.register({
-  maxEntries: 5000,
+  maxEntries: 2000,
+  storage: { type: 'memory' },
+})
+```
+
+### File-backed JSONL
+
+Persists traffic logs to a rotating JSONL file. Entries survive restarts and are re-loaded on start.
+
+```typescript
+NestTrafficDeskModule.register({
   storage: {
-    type: "file",
-    filePath: "./var/traffic/traffic-desk.log.jsonl",
-    maxFileSizeBytes: 5 * 1024 * 1024,
-    maxFiles: 4
-  }
+    type: 'file',
+    filePath: './var/logs/traffic.jsonl',   // default: <cwd>/traffic-desk.log.jsonl
+    maxFileSizeBytes: 5 * 1024 * 1024,      // default: 5 MB per file
+    maxFiles: 4,                            // default: 3 rotated files kept
+  },
 })
 ```
 
-### Outgoing HTTP Example
+### Custom Store
 
-```ts
+Implement the `TrafficLogStore` interface to use any storage backend (database, Redis, S3, etc.).
+
+```typescript
+import { TrafficLogStore, TrafficLogEntry, TrafficFilterQuery } from 'nest-traffic-desk';
+
+class MyCustomStore implements TrafficLogStore {
+  async append(entry: TrafficLogEntry): Promise<void> { /* ... */ }
+  async query(filter: TrafficFilterQuery): Promise<{ total: number; filteredCount: number; items: TrafficLogEntry[] }> { /* ... */ }
+  async clear(): Promise<void> { /* ... */ }
+}
+
 NestTrafficDeskModule.register({
-  enableOutgoingHttp: true
+  storeFactory: () => new MyCustomStore(),
 })
 ```
 
-When enabled, outbound `fetch` calls are logged into the same stream with `direction: "outgoing"`.
+---
+
+## Capturing Outbound HTTP
+
+Setting `enableOutgoingHttp: true` patches the global `fetch` function and logs all outbound requests alongside inbound ones. Both directions appear in the same dashboard stream with a `direction` column (`incoming` / `outgoing`).
+
+```typescript
+NestTrafficDeskModule.register({
+  enableOutgoingHttp: true,
+})
+```
+
+> **Note:** Only calls made via the global `fetch` are captured. Calls via `axios`, `got`, `http`, or other clients are not affected unless they internally delegate to `fetch`.
+
+---
+
+## Disabling in Production
+
+The module respects the `enabled` flag and registers nothing when it is `false`. A common pattern is to tie it to an environment variable:
+
+```typescript
+NestTrafficDeskModule.register({
+  enabled: process.env.NODE_ENV !== 'production',
+})
+```
+
+---
 
 ## REST API
 
-Default: `GET /_logs/data`
+The data endpoint supports the following query parameters for server-side filtering.
 
-Query params:
+**`GET /_logs/data`**
 
-- `q`: substring match on request path
-- `method`: comma-separated methods (`GET,POST`)
-- `status`: exact (`500`) or class (`4xx`)
-- `sort`: `asc` or `desc` (default `desc`)
-- `limit`: max results
+| Parameter | Type | Description |
+|---|---|---|
+| `q` | `string` | Substring match on the request path. |
+| `method` | `string` | Comma-separated HTTP methods, e.g. `GET,POST`. |
+| `status` | `string` | Exact code (`500`) or class (`4xx`, `2xx`). |
+| `direction` | `string` | `incoming` or `outgoing`. |
+| `sort` | `string` | `asc` or `desc` (default `desc`). |
+| `limit` | `number` | Maximum number of items to return. |
 
-Response:
+**Response**
 
 ```json
 {
-  "total": 42,
-  "filteredCount": 7,
-  "items": []
+  "total": 1024,
+  "filteredCount": 12,
+  "items": [
+    {
+      "id": "01HXYZ...",
+      "direction": "incoming",
+      "correlationId": "abc-123",
+      "timestamp": "2025-04-15T10:30:00.000Z",
+      "method": "POST",
+      "path": "/api/users",
+      "statusCode": 201,
+      "durationMs": 48,
+      "requestHeaders": { "content-type": "application/json" },
+      "requestBody": { "name": "Alice" },
+      "responseBody": { "id": 99, "name": "Alice" },
+      "remoteAddress": "127.0.0.1"
+    }
+  ]
 }
 ```
 
-## WebSocket Contract
+---
 
-- Event `traffic:snapshot`: emitted to newly connected clients.
-- Event `traffic:new`: emitted per new logged request.
+## WebSocket Events
 
-The dashboard uses reconnect with exponential backoff and shows connection status (`Connected`, `Reconnecting (attempt N)`, `Connection error`).
+The module emits two events on the configured Socket.IO namespace.
 
-## Build UI Assets
+| Event | Payload | Description |
+|---|---|---|
+| `traffic:snapshot` | `TrafficLogEntry[]` | Full current log emitted to a client immediately on connect. |
+| `traffic:new` | `TrafficLogEntry` | Emitted to all connected clients each time a new entry is logged. |
 
-The dashboard build output is expected in `assets/ui`.
+The dashboard handles reconnection automatically with exponential backoff and displays a live connection status indicator.
 
-```bash
-npm run build:ui
+---
+
+## TypeScript Types
+
+All public types are exported from the package entry point.
+
+```typescript
+import {
+  TrafficLogEntry,
+  TrafficDirection,
+  TrafficDeskModuleOptions,
+  TrafficDeskStorageOptions,
+  TrafficFilterQuery,
+  TrafficLogStore,
+  FileTrafficLogStore,
+} from 'nest-traffic-desk';
 ```
 
-Then run:
+---
 
-```bash
-npm run build
-```
+## Security
 
-## Security Notes
+- **Header redaction** — `authorization`, `cookie`, `set-cookie`, and `x-api-key` headers are redacted by default. Extend the `redactHeaders` list to cover any additional sensitive headers.
+- **Access control** — The dashboard and data endpoint are **not protected** by any authentication layer. In any shared or production environment, guard `/_logs` and `/_logs/data` with an auth guard, IP allowlist, or reverse proxy rule.
+- **Body capture** — Consider setting `captureRequestBody: false` and `captureResponseBody: false` if requests carry PII or secrets that should never be logged.
 
-- Sensitive headers are redacted by default.
-- Protect `/_logs` and `/_logs/data` with your own auth guards/network controls in production.
-- Keep body capture enabled only where appropriate.
+---
+
+## License
+
+[MIT](./LICENSE)

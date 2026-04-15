@@ -22,4 +22,7 @@ export interface FilterState {
   q: string;
   methods: string[];
   status: string;
+  direction: "all" | "incoming" | "outgoing";
+  durationMin: number;
+  durationMax: number;
 }

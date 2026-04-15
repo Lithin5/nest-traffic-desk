@@ -28,6 +28,12 @@ export class NestTrafficDeskModule implements NestModule {
       ...options
     } as ResolvedTrafficDeskModuleOptions;
 
+    // When disabled, return a no-op module — no interceptors, no gateway,
+    // no HTTP routes, no WebSocket are registered at all.
+    if (merged.enabled === false) {
+      return { module: NestTrafficDeskModule };
+    }
+
     return {
       module: NestTrafficDeskModule,
       providers: [

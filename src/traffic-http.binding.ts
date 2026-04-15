@@ -1,37 +1,51 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
-import { ModuleRef } from "@nestjs/core";
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from "@nestjs/common";
 import type { AbstractHttpAdapter } from "@nestjs/core";
+import type { HttpAdapterHost } from "@nestjs/core";
 import { existsSync, readFileSync, statSync } from "fs";
 import { extname, join, normalize } from "path";
 import { TRAFFIC_DESK_OPTIONS } from "./constants";
 import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLoggingService } from "./traffic-logging.service";
+import { TrafficDeskGateway } from "./traffic-desk.gateway";
 import { TrafficFilterQuery } from "./types/traffic-filter-query";
 
 interface QueryLike {
   [key: string]: string | string[] | undefined;
 }
 
+/**
+ * Token for HttpAdapterHost from the same @nestjs/core instance the host app uses.
+ * Constructor-injecting ModuleRef or HttpAdapterHost from a static import breaks when the
+ * library resolves a different physical @nestjs/core than Nest's DI (e.g. pnpm duplicate copies).
+ */
+const HTTP_ADAPTER_HOST_TOKEN = (() => {
+  const corePath = require.resolve("@nestjs/core", {
+    paths: [process.cwd(), __dirname]
+  });
+  return (require(corePath) as typeof import("@nestjs/core")).HttpAdapterHost;
+})();
+
 @Injectable()
-export class TrafficHttpBinding {
+export class TrafficHttpBinding implements OnModuleInit {
   private readonly logger = new Logger(TrafficHttpBinding.name);
 
   constructor(
-    private readonly moduleRef: ModuleRef,
+    @Optional()
+    @Inject(HTTP_ADAPTER_HOST_TOKEN)
+    private readonly httpAdapterHost: HttpAdapterHost | undefined,
     private readonly logging: TrafficLoggingService,
+    private readonly gateway: TrafficDeskGateway,
     @Inject(TRAFFIC_DESK_OPTIONS)
     private readonly options: ResolvedTrafficDeskModuleOptions
   ) {
     // Bind during provider construction (NestFactory.initialize), before NestApplication.init().
     // That places routes on the adapter before registerRouterHooks() installs the catch-all 404.
-    //
-    // Resolve HttpAdapterHost via ModuleRef + the host app's @nestjs/core copy. If the library and
-    // the application each embed a different physical @nestjs/core, constructor injection of
-    // HttpAdapterHost breaks (Optional → undefined) and no routes are registered.
-    const adapter = this.resolveHttpAdapter();
+    // Socket.IO is also attached here — it only hooks upgrade events, so attaching before
+    // listen() is safe and ensures the WebSocket server is ready when the first client connects.
+    const adapter = this.httpAdapterHost?.httpAdapter;
     if (!adapter) {
       this.logger.warn(
-        "Could not resolve the HTTP adapter, so /_logs routes were not bound. Use a single @nestjs/core in the app (npm dedupe / overrides) or ensure NestFactory.create() is used."
+        "Could not resolve HttpAdapterHost / HTTP adapter, so /_logs routes were not bound. Use a single @nestjs/core in the app (npm dedupe / overrides) or ensure NestFactory.create() is used."
       );
       return;
     }
@@ -42,21 +56,10 @@ export class TrafficHttpBinding {
     );
   }
 
-  /**
-   * Looks up HttpAdapterHost using the same @nestjs/core package the running app wired into DI.
-   */
-  private resolveHttpAdapter(): AbstractHttpAdapter | undefined {
-    try {
-      const corePath = require.resolve("@nestjs/core", {
-        paths: [process.cwd(), __dirname]
-      });
-      const { HttpAdapterHost } = require(corePath) as typeof import("@nestjs/core");
-      const host = this.moduleRef.get(HttpAdapterHost, { strict: false });
-      return host?.httpAdapter;
-    } catch (e) {
-      this.logger.debug(`resolveHttpAdapter: ${(e as Error).message}`);
-      return undefined;
-    }
+  onModuleInit(): void {
+    const adapter = this.httpAdapterHost?.httpAdapter;
+    if (!adapter) return;
+    this.gateway.attachToHttpServer(adapter.getHttpServer());
   }
 
   private bindAdapterRoutes(adapter: AbstractHttpAdapter): void {
