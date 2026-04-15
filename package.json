@@ -1,0 +1,41 @@
+{
+  "name": "nest-traffic-desk",
+  "version": "0.1.0",
+  "description": "Reusable NestJS traffic logging module with live dashboard",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "assets/ui",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run build:ui && tsc -p tsconfig.build.json",
+    "build:ui": "vite build --config ui/vite.config.ts",
+    "dev:ui": "vite --config ui/vite.config.ts",
+    "clean": "if exist dist rmdir /s /q dist & if exist assets\\ui rmdir /s /q assets\\ui"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^10.0.0 || ^11.0.0",
+    "@nestjs/core": "^10.0.0 || ^11.0.0",
+    "@nestjs/platform-socket.io": "^10.0.0 || ^11.0.0",
+    "@nestjs/websockets": "^10.0.0 || ^11.0.0",
+    "reflect-metadata": "^0.1.13 || ^0.2.0",
+    "rxjs": "^7.8.0"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "socket.io-client": "^4.8.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
