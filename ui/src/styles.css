@@ -607,6 +607,22 @@ tbody tr:hover { background: var(--row-hover); }
   border-radius: var(--radius-xs);
   padding: 0.2rem 0.5rem;
 }
+.block-btn {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-left: 0.5rem;
+  transition: all var(--transition);
+}
+.block-btn:hover {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
 
 /* ─── Tabbed Viewer ──────────────────────────────────────────────── */
 .tabbed-viewer {

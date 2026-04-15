@@ -90,6 +90,8 @@ export function App() {
   const [theme, setTheme] = useState<"light" | "dark">(
     () => (localStorage.getItem("td-theme") as "light" | "dark") ?? "light"
   );
+  const [showExclusions, setShowExclusions] = useState(false);
+  const [newExcludePath, setNewExcludePath] = useState("");
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
@@ -197,6 +199,30 @@ export function App() {
 
   const selectedLog = filteredLogs.find((e) => e.id === selectedId) ?? null;
 
+  const derivedErrorSection = useMemo(() => {
+    if (!selectedLog) return null;
+
+    let message = selectedLog.errorMessage;
+
+    if (!message && selectedLog.responseBody && typeof selectedLog.responseBody === "object") {
+      const body = selectedLog.responseBody as Record<string, unknown>;
+      const fromBody = (body.error ?? body.message) as unknown;
+      if (fromBody !== undefined && fromBody !== null) {
+        message = String(fromBody);
+      }
+    }
+
+    if (!message) return null;
+
+    return {
+      title: "Error Info",
+      data: {
+        message,
+        stack: selectedLog.errorStack,
+      },
+    } as const;
+  }, [selectedLog]);
+
   // Keyboard navigation
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -239,6 +265,41 @@ export function App() {
         ? f.methods.filter((m) => m !== method)
         : [...f.methods, method],
     }));
+  }
+
+  async function blockPath(path: string) {
+    if (!window.confirm(`Ignore all future requests starting with "${path}"?`))
+      return;
+    try {
+      const res = await fetch("./ignore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      if (res.ok) {
+        // Refresh config to update ignore list
+        const loadedConfig = await fetchConfig();
+        setConfig(loadedConfig);
+      }
+    } catch (err) {
+      console.error("Failed to block path:", err);
+    }
+  }
+
+  async function unblockPath(path: string) {
+    try {
+      const res = await fetch("./ignore", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path }),
+      });
+      if (res.ok) {
+        const loadedConfig = await fetchConfig();
+        setConfig(loadedConfig);
+      }
+    } catch (err) {
+      console.error("Failed to unblock path:", err);
+    }
   }
 
   return (
@@ -286,6 +347,15 @@ export function App() {
             🗑 Clear
           </button>
           <button
+            id="btn-ignored-paths"
+            type="button"
+            className={`topbar-btn${showExclusions ? " topbar-btn--active" : ""}`}
+            onClick={() => setShowExclusions((v) => !v)}
+            title="Manage ignored paths (exclude from logging)"
+          >
+            🚫 Ignored Paths {config?.ignorePaths?.length ? `(${config.ignorePaths.length})` : ""}
+          </button>
+          <button
             id="btn-theme"
             type="button"
             className="topbar-btn"
@@ -303,6 +373,42 @@ export function App() {
           </div>
         </div>
       </header>
+
+      {/* ── Ignored Paths Manager ── */}
+      {showExclusions && (
+        <section className="exclusions-manager panel" style={{ padding: "1rem", borderRadius: "14px", border: "1px solid var(--border)", background: "var(--panel-alt)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+            <h2 style={{ fontSize: "1rem", margin: 0 }}>Ignored Paths</h2>
+            <button className="ghost-btn" style={{ padding: "0.2rem 0.5rem" }} onClick={() => setShowExclusions(false)}>Close</button>
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+            <input 
+              type="text" 
+              placeholder="/api/health, /metrics ..." 
+              value={newExcludePath} 
+              onChange={(e) => setNewExcludePath(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            <button className="topbar-btn" style={{ background: "var(--accent)", color: "white" }} onClick={() => { if (newExcludePath) { blockPath(newExcludePath); setNewExcludePath(""); } }}>Add Path</button>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            {config?.ignorePaths?.map(path => (
+              <div key={path} className="chip active" style={{ display: "flex", alignItems: "center", gap: "0.4rem", padding: "0.3rem 0.7rem" }}>
+                {path}
+                <button 
+                  style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0, fontSize: "0.9rem" }}
+                  onClick={() => unblockPath(path)}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+            {(!config?.ignorePaths || config.ignorePaths.length === 0) && (
+              <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>No paths are currently ignored. Error responses (4xx/5xx) will always be shown.</div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── Filter Bar ── */}
       <section className="filter-bar" aria-label="Log filters">
@@ -516,9 +622,17 @@ export function App() {
                 <div className="detail-head-top">
                   <h3>
                     <span className={methodClass(selectedLog.method)} style={{ marginRight: "0.5rem" }}>
-                      {selectedLog.method}
+                    {selectedLog.method}
                     </span>
                     {selectedLog.path}
+                    <button
+                      type="button"
+                      className="block-btn"
+                      onClick={() => blockPath(selectedLog.path)}
+                      title="Add this path to exclusion list"
+                    >
+                      🚫 Block
+                    </button>
                   </h3>
                   <button
                     type="button"
@@ -545,9 +659,10 @@ export function App() {
               <TabbedJsonViewer
                 sections={[
                   { title: "Request Headers", data: selectedLog.requestHeaders },
-                  { title: "Request Body", data: selectedLog.requestBody ?? { message: "Not captured" } },
-                  { title: "Response Body", data: selectedLog.responseBody ?? { message: "Not captured" } },
-                ]}
+                  ...(selectedLog.requestBody ? [{ title: "Request Body", data: selectedLog.requestBody }] : []),
+                  ...(selectedLog.responseBody ? [{ title: "Response Body", data: selectedLog.responseBody }] : []),
+                  ...(derivedErrorSection ? [derivedErrorSection] : []),
+                ].map(s => s.data ? s : { ...s, data: { message: "Not captured / empty" } })}
               />
             </>
           )}

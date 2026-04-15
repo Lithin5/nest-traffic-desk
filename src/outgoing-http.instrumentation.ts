@@ -88,7 +88,9 @@ export class OutgoingHttpInstrumentation implements OnModuleInit, OnModuleDestro
                 { error: this.errorMessage(error) },
                 this.options.maxBodySizeBytes
               )
-            : undefined
+            : undefined,
+          errorMessage: this.errorMessage(error),
+          errorStack: error instanceof Error ? error.stack : undefined
         });
 
         throw error;

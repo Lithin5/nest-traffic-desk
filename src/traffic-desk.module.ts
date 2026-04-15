@@ -1,5 +1,5 @@
 import { DynamicModule, Global, Module, NestModule } from "@nestjs/common";
-import { APP_INTERCEPTOR } from "@nestjs/core";
+import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
 import { TRAFFIC_DESK_OPTIONS, TRAFFIC_DESK_STORE } from "./constants";
 import {
   defaultTrafficDeskOptions,
@@ -13,6 +13,7 @@ import { TrafficInterceptor } from "./traffic.interceptor";
 import { TrafficDeskGateway } from "./traffic-desk.gateway";
 import { TrafficHttpBinding } from "./traffic-http.binding";
 import { OutgoingHttpInstrumentation } from "./outgoing-http.instrumentation";
+import { TrafficExceptionFilter } from "./traffic-exception.filter";
 import { join } from "path";
 
 @Global()
@@ -23,9 +24,21 @@ export class NestTrafficDeskModule implements NestModule {
   }
 
   static register(options: TrafficDeskModuleOptions = {}): DynamicModule {
-    const merged = {
+    const mergedOptions = {
       ...defaultTrafficDeskOptions,
       ...options
+    };
+
+    // Support both ignorePaths and excludePaths (user-facing alias)
+    const ignorePaths = [
+      ...(mergedOptions.ignorePaths || []),
+      ...(mergedOptions.excludePaths || [])
+    ].filter((p, idx, self) => self.indexOf(p) === idx); // dedupe
+
+    const merged = {
+      ...mergedOptions,
+      ignorePaths,
+      // excludePaths is intentionally omitted from final resolved options
     } as ResolvedTrafficDeskModuleOptions;
 
     // When disabled, return a no-op module — no interceptors, no gateway,
@@ -63,7 +76,12 @@ export class NestTrafficDeskModule implements NestModule {
         TrafficDeskGateway,
         TrafficLoggingService,
         OutgoingHttpInstrumentation,
+        TrafficExceptionFilter,
         TrafficHttpBinding,
+        {
+          provide: APP_FILTER,
+          useClass: TrafficExceptionFilter
+        },
         {
           provide: APP_INTERCEPTOR,
           useClass: TrafficInterceptor

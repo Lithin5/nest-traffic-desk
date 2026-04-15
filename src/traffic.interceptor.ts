@@ -8,7 +8,7 @@ import {
 import { Observable } from "rxjs";
 import { finalize, tap } from "rxjs/operators";
 import { randomUUID } from "crypto";
-import { TRAFFIC_DESK_OPTIONS } from "./constants";
+import { TRAFFIC_DESK_OPTIONS, TRAFFIC_DESK_REQUEST_CAPTURED_FLAG } from "./constants";
 import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLoggingService } from "./traffic-logging.service";
 import { clampBody, redactHeaders } from "./utils/log-sanitizer";
@@ -39,14 +39,24 @@ export class TrafficInterceptor implements NestInterceptor {
     >();
     const response = http.getResponse<{ statusCode?: number }>();
     const path = request.originalUrl ?? request.url ?? "/";
+    (request as Record<string, unknown>)[TRAFFIC_DESK_REQUEST_CAPTURED_FLAG] = true;
 
-    if (this.options.ignorePaths.some((ignored) => path.startsWith(ignored))) {
+    // Support both ignorePaths and excludePaths (from module options)
+    const allIgnorePaths = [
+      ...(this.options.ignorePaths || []),
+      ...(this.options.excludePaths || [])
+    ];
+
+    if (allIgnorePaths.some((ignored) => path.startsWith(ignored))) {
       return next.handle();
     }
 
     const startedAt = Date.now();
     let responseBody: unknown;
     let responseStatus = 500;
+
+    let errorMessage: string | undefined;
+    let errorStack: string | undefined;
 
     return next.handle().pipe(
       tap({
@@ -55,10 +65,29 @@ export class TrafficInterceptor implements NestInterceptor {
           responseStatus = response.statusCode ?? 200;
         },
         error: (err) => {
-          responseStatus = err?.status ?? response.statusCode ?? 500;
-          responseBody = {
-            error: err?.message ?? "Unhandled error"
-          };
+          // Improved extraction for common auth/401 errors and NestJS exceptions
+          responseStatus =
+            err?.status ??
+            (typeof err?.getStatus === "function" ? err.getStatus() : undefined) ??
+            (err?.response?.statusCode) ??
+            ((response.statusCode ?? 0) >= 400 ? response.statusCode! : 500);
+
+          const detail = err?.response ?? err;
+          const detailMessage = Array.isArray(detail?.message)
+            ? detail.message.join(", ")
+            : detail?.message;
+          errorMessage =
+            detailMessage ||
+            detail?.error ||
+            err?.message ||
+            (typeof detail === "string" ? detail : "Unauthorized or unhandled error");
+          errorStack = err?.stack;
+          responseBody = detail;
+
+          // Ensure 401s from common NestJS UnauthorizedException are captured
+          if (responseStatus === 401 && (!errorMessage || !errorMessage.includes("Unauthorized"))) {
+            errorMessage = "Unauthorized";
+          }
         }
       }),
       finalize(() => {
@@ -79,6 +108,8 @@ export class TrafficInterceptor implements NestInterceptor {
           responseBody: this.options.captureResponseBody
             ? clampBody(responseBody, this.options.maxBodySizeBytes)
             : undefined,
+          errorMessage,
+          errorStack,
           remoteAddress: request.ip
         };
 

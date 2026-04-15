@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { TRAFFIC_DESK_OPTIONS, TRAFFIC_DESK_STORE } from "./constants";
 import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLogStore } from "./storage/traffic-log-store";
@@ -8,6 +8,8 @@ import { TrafficDeskGateway } from "./traffic-desk.gateway";
 
 @Injectable()
 export class TrafficLoggingService implements OnModuleInit {
+  private readonly logger = new Logger(TrafficLoggingService.name);
+
   constructor(
     @Inject(TRAFFIC_DESK_STORE)
     private readonly store: TrafficLogStore,
@@ -15,6 +17,8 @@ export class TrafficLoggingService implements OnModuleInit {
     private readonly options: ResolvedTrafficDeskModuleOptions,
     private readonly gateway: TrafficDeskGateway
   ) {}
+  
+  private readonly dynamicIgnorePaths = new Set<string>();
 
   onModuleInit(): void {
     this.gateway.setSnapshotProvider(() => this.store.getAll());
@@ -25,8 +29,40 @@ export class TrafficLoggingService implements OnModuleInit {
       return;
     }
 
+    if (this.isExcluded(entry.path)) {
+      if (entry.statusCode >= 400) {
+        this.logger.warn(`[Excluded] ${entry.method} ${entry.path} ${entry.statusCode} - would have been logged as error`);
+      }
+      return;
+    }
+
     this.store.add(entry);
     this.gateway.broadcastNewEntry(entry);
+  }
+
+  isExcluded(path: string): boolean {
+    if (this.options.ignorePaths.some((ignored) => path.startsWith(ignored))) {
+      return true;
+    }
+    for (const ignored of this.dynamicIgnorePaths) {
+      if (path.startsWith(ignored)) return true;
+    }
+    return false;
+  }
+
+  addIgnorePath(path: string): void {
+    this.dynamicIgnorePaths.add(path);
+  }
+
+  removeIgnorePath(path: string): void {
+    this.dynamicIgnorePaths.delete(path);
+  }
+
+  getIgnorePaths(): string[] {
+    return [
+      ...this.options.ignorePaths,
+      ...Array.from(this.dynamicIgnorePaths)
+    ];
   }
 
   query(filters: TrafficFilterQuery): { total: number; filteredCount: number; items: TrafficLogEntry[] } {

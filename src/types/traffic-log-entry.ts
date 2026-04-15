@@ -12,5 +12,7 @@ export interface TrafficLogEntry {
   requestHeaders: Record<string, unknown>;
   requestBody?: unknown;
   responseBody?: unknown;
+  errorMessage?: string;
+  errorStack?: string;
   remoteAddress?: string;
 }

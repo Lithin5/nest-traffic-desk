@@ -155,6 +155,37 @@ NestTrafficDeskModule.register({
 ```
 
 > **Note:** Only calls made via the global `fetch` are captured. Calls via `axios`, `got`, `http`, or other clients are not affected unless they internally delegate to `fetch`.
+>
+> When an outbound `fetch` throws (DNS/network/timeout/runtime errors), the entry is logged with:
+> - `statusCode: 599`
+> - `errorMessage` and `errorStack` (when available)
+> - `responseBody.error` for backward compatibility
+
+---
+
+## Capturing Guard/Auth Errors (401/403)
+
+`nest-traffic-desk` includes a global exception filter so HTTP errors that happen before controller handlers (for example `JwtAuthGuard` failures) are still captured and shown in the UI.
+
+This covers common cases like:
+
+- `401 Unauthorized` from global auth guards
+- `403 Forbidden` from role/permission guards
+- other exceptions raised before the route interceptor emits a normal success/error flow
+
+### If your app uses a custom global exception filter
+
+If you register your own filter with `app.useGlobalFilters(...)`, make sure it also forwards uncaptured errors into `TrafficLoggingService`. Otherwise guard-level failures may be handled by your filter but never recorded by Traffic Desk.
+
+Pattern:
+
+```typescript
+// main.ts
+const trafficLogging = app.get(TrafficLoggingService, { strict: false });
+app.useGlobalFilters(new HttpExceptionFilter(trafficLogging));
+```
+
+And inside your custom filter, call `trafficLogging.add(...)` when the request was not already captured by the interceptor/filter pipeline.
 
 ---
 

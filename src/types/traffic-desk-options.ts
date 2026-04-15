@@ -28,15 +28,18 @@ export interface TrafficDeskModuleOptions {
   enableWebsocket?: boolean;
   websocketNamespace?: string;
   ignorePaths?: string[];
+  /** @deprecated Use ignorePaths instead. Kept for backward compatibility with "exclude" terminology. */
+  excludePaths?: string[];
   storage?: TrafficDeskStorageOptions;
   storeFactory?: () => TrafficLogStore;
 }
 
 export type ResolvedTrafficDeskModuleOptions = Omit<
   Required<TrafficDeskModuleOptions>,
-  "storeFactory"
+  "storeFactory" | "excludePaths"
 > & {
   storeFactory?: () => TrafficLogStore;
+  excludePaths?: string[]; // kept for runtime checks in interceptor
 };
 
 export const defaultTrafficDeskOptions: ResolvedTrafficDeskModuleOptions = {
@@ -54,6 +57,7 @@ export const defaultTrafficDeskOptions: ResolvedTrafficDeskModuleOptions = {
   enableWebsocket: true,
   websocketNamespace: "/",
   ignorePaths: ["/_logs", "/_logs/data", "/socket.io"],
+  excludePaths: [],
   storage: {
     type: "memory"
   }

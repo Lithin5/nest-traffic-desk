@@ -102,8 +102,26 @@ export class TrafficHttpBinding implements OnModuleInit {
     adapter.get(`${uiBasePath}/config`, (_req: unknown, res: unknown) => {
       adapter.reply(res, {
         dataPath: this.options.dataPath,
-        websocketNamespace: this.options.websocketNamespace
+        websocketNamespace: this.options.websocketNamespace,
+        ignorePaths: this.logging.getIgnorePaths()
       });
+    });
+
+    adapter.post(`${uiBasePath}/ignore`, (req: any, res: any) => {
+      const path = req.body?.path;
+      if (path) this.logging.addIgnorePath(path);
+      adapter.reply(res, { success: true });
+    });
+
+    adapter.delete(`${uiBasePath}/ignore`, (req: any, res: any) => {
+      const path = req.body?.path;
+      // In some adapters, DELETE body might be in req.query or not available, 
+      // but we'll try to get it from body or query.
+      const pathValue = req.body?.path ?? this.getQuery(req).path;
+      if (pathValue && typeof pathValue === 'string') {
+        this.logging.removeIgnorePath(pathValue);
+      }
+      adapter.reply(res, { success: true });
     });
 
     adapter.get(uiBasePath, (_req: unknown, res: unknown) => {

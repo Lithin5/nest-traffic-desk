@@ -10,12 +10,15 @@ export interface TrafficLogEntry {
   requestHeaders: Record<string, unknown>;
   requestBody?: unknown;
   responseBody?: unknown;
+  errorMessage?: string;
+  errorStack?: string;
   remoteAddress?: string;
 }
 
 export interface TrafficDeskConfig {
   dataPath: string;
   websocketNamespace: string;
+  ignorePaths: string[];
 }
 
 export interface FilterState {
