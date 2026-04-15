@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/nest-traffic-desk?color=6366f1&style=flat-square)](https://www.npmjs.com/package/nest-traffic-desk)
 [![npm downloads](https://img.shields.io/npm/dm/nest-traffic-desk?color=6366f1&style=flat-square)](https://www.npmjs.com/package/nest-traffic-desk)
-[![license](https://img.shields.io/npm/l/nest-traffic-desk?color=6366f1&style=flat-square)](https://github.com/accodesk/nest-traffic-desk/blob/main/LICENSE)
+[![license](https://img.shields.io/npm/l/nest-traffic-desk?color=6366f1&style=flat-square)](https://www.npmjs.com/package/nest-traffic-desk)
 [![NestJS](https://img.shields.io/badge/NestJS-10%20%7C%2011-e0234e?style=flat-square)](https://nestjs.com)
 
 A plug-and-play NestJS module that captures every inbound and outbound HTTP request and serves a live dashboard — directly from your running application. Zero configuration required to get started.

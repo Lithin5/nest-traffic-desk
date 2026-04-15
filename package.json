@@ -8,9 +8,24 @@
   "files": [
     "dist",
     "assets/ui",
-    "README.md"
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "nestjs",
+    "nestjs-module",
+    "http",
+    "logging",
+    "traffic",
+    "debugging",
+    "dashboard",
+    "websocket",
+    "socket.io",
+    "monitoring",
+    "interceptor"
   ],
   "scripts": {
+    "prepublishOnly": "npm run build",
     "build": "npm run build:ui && tsc -p tsconfig.build.json",
     "build:ui": "vite build --config ui/vite.config.ts",
     "dev:ui": "vite --config ui/vite.config.ts",
