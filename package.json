@@ -1,6 +1,6 @@
 {
   "name": "nest-traffic-desk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reusable NestJS traffic logging module with live dashboard",
   "license": "MIT",
   "main": "dist/index.js",

@@ -251,6 +251,16 @@ import {
 
 ---
 
+## Publishing (maintainers)
+
+1. Ensure you are logged in: `npm login` (or `npm login --auth-type=web` with 2FA).
+2. Bump `version` in `package.json` if that version was already published.
+3. From the repo root: `npm publish`
+
+`prepublishOnly` runs `npm run build` automatically so `dist/` and `assets/ui/` are always fresh in the tarball. Use `npm publish --dry-run` to inspect contents without uploading.
+
+---
+
 ## License
 
 [MIT](./LICENSE)
