@@ -1,3 +1,18 @@
+import { TrafficLogStore } from "../storage/traffic-log-store";
+
+export interface FileStorageOptions {
+  type: "file";
+  filePath?: string;
+  maxFileSizeBytes?: number;
+  maxFiles?: number;
+}
+
+export interface MemoryStorageOptions {
+  type: "memory";
+}
+
+export type TrafficDeskStorageOptions = MemoryStorageOptions | FileStorageOptions;
+
 export interface TrafficDeskModuleOptions {
   enabled?: boolean;
   maxEntries?: number;
@@ -5,6 +20,7 @@ export interface TrafficDeskModuleOptions {
   captureRequestBody?: boolean;
   captureResponseBody?: boolean;
   redactHeaders?: string[];
+  enableOutgoingHttp?: boolean;
   uiBasePath?: string;
   dataPath?: string;
   uiDistPath?: string;
@@ -12,20 +28,33 @@ export interface TrafficDeskModuleOptions {
   enableWebsocket?: boolean;
   websocketNamespace?: string;
   ignorePaths?: string[];
+  storage?: TrafficDeskStorageOptions;
+  storeFactory?: () => TrafficLogStore;
 }
 
-export const defaultTrafficDeskOptions: Required<TrafficDeskModuleOptions> = {
+export type ResolvedTrafficDeskModuleOptions = Omit<
+  Required<TrafficDeskModuleOptions>,
+  "storeFactory"
+> & {
+  storeFactory?: () => TrafficLogStore;
+};
+
+export const defaultTrafficDeskOptions: ResolvedTrafficDeskModuleOptions = {
   enabled: true,
   maxEntries: 1000,
   maxBodySizeBytes: 16_384,
   captureRequestBody: true,
   captureResponseBody: true,
   redactHeaders: ["authorization", "cookie", "set-cookie", "x-api-key"],
+  enableOutgoingHttp: false,
   uiBasePath: "/_logs",
   dataPath: "/_logs/data",
   uiDistPath: "",
   enableUi: true,
   enableWebsocket: true,
   websocketNamespace: "/",
-  ignorePaths: ["/_logs", "/_logs/data", "/socket.io"]
+  ignorePaths: ["/_logs", "/_logs/data", "/socket.io"],
+  storage: {
+    type: "memory"
+  }
 };

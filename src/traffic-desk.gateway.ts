@@ -1,19 +1,24 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { WebSocketGateway, WebSocketServer, OnGatewayConnection } from "@nestjs/websockets";
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  OnGatewayConnection,
+  OnGatewayInit
+} from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
 import {
   TRAFFIC_DESK_EVENT_NEW,
   TRAFFIC_DESK_EVENT_SNAPSHOT,
   TRAFFIC_DESK_OPTIONS
 } from "./constants";
-import { TrafficDeskModuleOptions } from "./types/traffic-desk-options";
+import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLogEntry } from "./types/traffic-log-entry";
 
 @Injectable()
 @WebSocketGateway({
   cors: { origin: true, credentials: false }
 })
-export class TrafficDeskGateway implements OnGatewayConnection {
+export class TrafficDeskGateway implements OnGatewayConnection, OnGatewayInit {
   @WebSocketServer()
   server?: Server;
 
@@ -21,11 +26,29 @@ export class TrafficDeskGateway implements OnGatewayConnection {
 
   constructor(
     @Inject(TRAFFIC_DESK_OPTIONS)
-    private readonly options: Required<TrafficDeskModuleOptions>
+    private readonly options: ResolvedTrafficDeskModuleOptions
   ) {}
 
   setSnapshotProvider(provider: () => TrafficLogEntry[]): void {
     this.snapshotProvider = provider;
+  }
+
+  afterInit(server: Server): void {
+    const namespace = this.options.websocketNamespace;
+    if (namespace === "/") {
+      return;
+    }
+
+    server.of(namespace).on("connection", (client: Socket) => {
+      if (!this.options.enableWebsocket) {
+        client.disconnect(true);
+        return;
+      }
+
+      if (this.snapshotProvider) {
+        client.emit(TRAFFIC_DESK_EVENT_SNAPSHOT, this.snapshotProvider());
+      }
+    });
   }
 
   handleConnection(client: Socket): void {

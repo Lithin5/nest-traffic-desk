@@ -9,7 +9,7 @@ import { Observable } from "rxjs";
 import { finalize, tap } from "rxjs/operators";
 import { randomUUID } from "crypto";
 import { TRAFFIC_DESK_OPTIONS } from "./constants";
-import { TrafficDeskModuleOptions } from "./types/traffic-desk-options";
+import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLoggingService } from "./traffic-logging.service";
 import { clampBody, redactHeaders } from "./utils/log-sanitizer";
 
@@ -17,7 +17,7 @@ import { clampBody, redactHeaders } from "./utils/log-sanitizer";
 export class TrafficInterceptor implements NestInterceptor {
   constructor(
     @Inject(TRAFFIC_DESK_OPTIONS)
-    private readonly options: Required<TrafficDeskModuleOptions>,
+    private readonly options: ResolvedTrafficDeskModuleOptions,
     private readonly logging: TrafficLoggingService
   ) {}
 

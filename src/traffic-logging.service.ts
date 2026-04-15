@@ -1,6 +1,6 @@
 import { Inject, Injectable, OnModuleInit } from "@nestjs/common";
 import { TRAFFIC_DESK_OPTIONS, TRAFFIC_DESK_STORE } from "./constants";
-import { TrafficDeskModuleOptions } from "./types/traffic-desk-options";
+import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLogStore } from "./storage/traffic-log-store";
 import { TrafficLogEntry } from "./types/traffic-log-entry";
 import { TrafficFilterQuery } from "./types/traffic-filter-query";
@@ -12,7 +12,7 @@ export class TrafficLoggingService implements OnModuleInit {
     @Inject(TRAFFIC_DESK_STORE)
     private readonly store: TrafficLogStore,
     @Inject(TRAFFIC_DESK_OPTIONS)
-    private readonly options: Required<TrafficDeskModuleOptions>,
+    private readonly options: ResolvedTrafficDeskModuleOptions,
     private readonly gateway: TrafficDeskGateway
   ) {}
 

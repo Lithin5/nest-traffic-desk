@@ -57,6 +57,7 @@ export function App() {
   const [connectionState, setConnectionState] = useState<"connected" | "reconnecting" | "error">(
     "reconnecting"
   );
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
 
   useEffect(() => {
     let socket: Socket | null = null;
@@ -71,11 +72,23 @@ export function App() {
         setIsLoading(false);
 
         socket = io(loadedConfig.websocketNamespace || "/", {
-          transports: ["websocket", "polling"]
+          transports: ["websocket", "polling"],
+          reconnection: true,
+          reconnectionAttempts: Infinity,
+          reconnectionDelay: 750,
+          reconnectionDelayMax: 5000,
+          randomizationFactor: 0.25
         });
 
-        socket.on("connect", () => setConnectionState("connected"));
+        socket.on("connect", () => {
+          setConnectionState("connected");
+          setReconnectAttempt(0);
+        });
         socket.on("disconnect", () => setConnectionState("reconnecting"));
+        socket.io.on("reconnect_attempt", (attempt) => {
+          setConnectionState("reconnecting");
+          setReconnectAttempt(attempt);
+        });
         socket.on("connect_error", () => setConnectionState("error"));
         socket.on("traffic:snapshot", (snapshot: TrafficLogEntry[]) => {
           setAllLogs(snapshot ?? []);
@@ -121,7 +134,8 @@ export function App() {
         <div className={`ws-state ws-${connectionState}`}>
           <span className="status-dot" />
           {connectionState === "connected" && "Connected"}
-          {connectionState === "reconnecting" && "Reconnecting"}
+          {connectionState === "reconnecting" &&
+            `Reconnecting${reconnectAttempt > 0 ? ` (attempt ${reconnectAttempt})` : ""}`}
           {connectionState === "error" && "Connection error"}
         </div>
       </header>
@@ -206,6 +220,7 @@ export function App() {
                 <tr>
                   <th>Time</th>
                   <th>Method</th>
+                  <th>Direction</th>
                   <th>Path</th>
                   <th>Status</th>
                   <th>Duration</th>
@@ -222,6 +237,7 @@ export function App() {
                     <td>
                       <span className={methodClass(entry.method)}>{entry.method}</span>
                     </td>
+                    <td>{entry.direction}</td>
                     <td className="path-cell">{entry.path}</td>
                     <td>
                       <span className={statusClass(entry.statusCode)}>{entry.statusCode}</span>
@@ -241,6 +257,7 @@ export function App() {
               <div className="detail-head">
                 <h3>{selectedLog.method} {selectedLog.path}</h3>
                 <p>
+                  <span>{selectedLog.direction}</span>
                   <span>{new Date(selectedLog.timestamp).toLocaleString()}</span>
                   <span>{selectedLog.durationMs} ms</span>
                   <span>Status {selectedLog.statusCode}</span>

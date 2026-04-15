@@ -4,7 +4,7 @@ import type { AbstractHttpAdapter } from "@nestjs/core";
 import { existsSync, readFileSync, statSync } from "fs";
 import { extname, join, normalize } from "path";
 import { TRAFFIC_DESK_OPTIONS } from "./constants";
-import { TrafficDeskModuleOptions } from "./types/traffic-desk-options";
+import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLoggingService } from "./traffic-logging.service";
 import { TrafficFilterQuery } from "./types/traffic-filter-query";
 
@@ -20,7 +20,7 @@ export class TrafficHttpBinding {
     private readonly moduleRef: ModuleRef,
     private readonly logging: TrafficLoggingService,
     @Inject(TRAFFIC_DESK_OPTIONS)
-    private readonly options: Required<TrafficDeskModuleOptions>
+    private readonly options: ResolvedTrafficDeskModuleOptions
   ) {
     // Bind during provider construction (NestFactory.initialize), before NestApplication.init().
     // That places routes on the adapter before registerRouterHooks() installs the catch-all 404.

@@ -2,12 +2,21 @@
 
 `nest-traffic-desk` is a NestJS module that captures HTTP traffic and ships a React dashboard with live updates.
 
-## Phase 1 Features
+## Features (Phase 1-4)
 
 - Global interceptor for inbound HTTP requests.
 - In-memory bounded store (ring-style behavior via max entry cap).
 - REST data endpoint with filtering.
 - WebSocket push for realtime rows.
+- Hardened realtime UX:
+  - snapshot on connect
+  - reconnect/backoff status visible in UI
+  - stable event contract (`traffic:snapshot`, `traffic:new`)
+- Optional outgoing HTTP capture (global `fetch`) with `direction: "outgoing"` entries.
+- Pluggable storage:
+  - default in-memory ring buffer
+  - file-backed JSONL store with rotation and restart persistence
+  - custom store via `storeFactory`
 - React SPA dashboard (served by Nest) with:
   - path search
   - method multi-select
@@ -15,6 +24,7 @@
   - clear filters
   - split list/detail inspector
   - JSON detail cards with copy buttons
+  - direction column (`incoming` / `outgoing`)
 
 ## Install
 
@@ -50,6 +60,7 @@ export class AppModule {}
 - `captureRequestBody` (`true`)
 - `captureResponseBody` (`true`)
 - `redactHeaders` (`authorization,cookie,set-cookie,x-api-key`)
+- `enableOutgoingHttp` (`false`): patch global `fetch` and log outbound calls.
 - `uiBasePath` (`/_logs`)
 - `dataPath` (`/_logs/data`)
 - `uiDistPath` (`""`): custom absolute path to built SPA assets.
@@ -57,6 +68,34 @@ export class AppModule {}
 - `enableWebsocket` (`true`)
 - `websocketNamespace` (`/`)
 - `ignorePaths` (`/_logs,/_logs/data,/socket.io`)
+- `storage` (default `{ type: "memory" }`):
+  - memory mode: `{ type: "memory" }`
+  - file mode: `{ type: "file", filePath, maxFileSizeBytes, maxFiles }`
+- `storeFactory`: custom store provider (`() => TrafficLogStore`).
+
+### File Storage Example
+
+```ts
+NestTrafficDeskModule.register({
+  maxEntries: 5000,
+  storage: {
+    type: "file",
+    filePath: "./var/traffic/traffic-desk.log.jsonl",
+    maxFileSizeBytes: 5 * 1024 * 1024,
+    maxFiles: 4
+  }
+})
+```
+
+### Outgoing HTTP Example
+
+```ts
+NestTrafficDeskModule.register({
+  enableOutgoingHttp: true
+})
+```
+
+When enabled, outbound `fetch` calls are logged into the same stream with `direction: "outgoing"`.
 
 ## REST API
 
@@ -84,6 +123,8 @@ Response:
 
 - Event `traffic:snapshot`: emitted to newly connected clients.
 - Event `traffic:new`: emitted per new logged request.
+
+The dashboard uses reconnect with exponential backoff and shows connection status (`Connected`, `Reconnecting (attempt N)`, `Connection error`).
 
 ## Build UI Assets
 

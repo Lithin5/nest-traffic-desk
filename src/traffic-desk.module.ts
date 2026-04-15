@@ -1,12 +1,19 @@
 import { DynamicModule, Global, Module, NestModule } from "@nestjs/common";
 import { APP_INTERCEPTOR } from "@nestjs/core";
 import { TRAFFIC_DESK_OPTIONS, TRAFFIC_DESK_STORE } from "./constants";
-import { defaultTrafficDeskOptions, TrafficDeskModuleOptions } from "./types/traffic-desk-options";
+import {
+  defaultTrafficDeskOptions,
+  ResolvedTrafficDeskModuleOptions,
+  TrafficDeskModuleOptions
+} from "./types/traffic-desk-options";
 import { InMemoryRingBufferStore } from "./storage/in-memory-ring-buffer.store";
+import { FileTrafficLogStore } from "./storage/file-traffic-log.store";
 import { TrafficLoggingService } from "./traffic-logging.service";
 import { TrafficInterceptor } from "./traffic.interceptor";
 import { TrafficDeskGateway } from "./traffic-desk.gateway";
 import { TrafficHttpBinding } from "./traffic-http.binding";
+import { OutgoingHttpInstrumentation } from "./outgoing-http.instrumentation";
+import { join } from "path";
 
 @Global()
 @Module({})
@@ -19,7 +26,7 @@ export class NestTrafficDeskModule implements NestModule {
     const merged = {
       ...defaultTrafficDeskOptions,
       ...options
-    } as Required<TrafficDeskModuleOptions>;
+    } as ResolvedTrafficDeskModuleOptions;
 
     return {
       module: NestTrafficDeskModule,
@@ -30,10 +37,26 @@ export class NestTrafficDeskModule implements NestModule {
         },
         {
           provide: TRAFFIC_DESK_STORE,
-          useFactory: () => new InMemoryRingBufferStore(merged.maxEntries)
+          useFactory: () => {
+            if (options.storeFactory) {
+              return options.storeFactory();
+            }
+
+            if (merged.storage.type === "file") {
+              return new FileTrafficLogStore({
+                maxEntries: merged.maxEntries,
+                filePath: merged.storage.filePath ?? join(process.cwd(), "traffic-desk.log.jsonl"),
+                maxFileSizeBytes: merged.storage.maxFileSizeBytes ?? 5 * 1024 * 1024,
+                maxFiles: merged.storage.maxFiles ?? 3
+              });
+            }
+
+            return new InMemoryRingBufferStore(merged.maxEntries);
+          }
         },
         TrafficDeskGateway,
         TrafficLoggingService,
+        OutgoingHttpInstrumentation,
         TrafficHttpBinding,
         {
           provide: APP_INTERCEPTOR,
