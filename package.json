@@ -1,6 +1,6 @@
 {
   "name": "nest-traffic-desk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Reusable NestJS traffic logging module with live dashboard",
   "license": "MIT",
   "main": "dist/index.js",
@@ -26,8 +26,7 @@
   ],
   "scripts": {
     "prepublishOnly": "npm run build",
-    "build": "npm run build:ui && tsc -p tsconfig.build.json",
-    "build:ui": "vite build --config ui/vite.config.ts",
+    "build": "vite build --config ui/vite.config.ts && tsc -p tsconfig.build.json",
     "dev:ui": "vite --config ui/vite.config.ts",
     "clean": "if exist dist rmdir /s /q dist & if exist assets\\ui rmdir /s /q assets\\ui"
   },

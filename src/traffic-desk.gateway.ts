@@ -3,10 +3,13 @@ import { Server, Socket } from "socket.io";
 import {
   TRAFFIC_DESK_EVENT_NEW,
   TRAFFIC_DESK_EVENT_SNAPSHOT,
+  TRAFFIC_DESK_EVENT_CONSOLE_NEW,
+  TRAFFIC_DESK_EVENT_CONSOLE_SNAPSHOT,
   TRAFFIC_DESK_OPTIONS
 } from "./constants";
 import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
 import { TrafficLogEntry } from "./types/traffic-log-entry";
+import { ConsoleLogEntry } from "./types/console-log-entry";
 
 /**
  * Manages the Socket.IO server that pushes live traffic events to the dashboard.
@@ -21,6 +24,7 @@ export class TrafficDeskGateway {
   private readonly logger = new Logger(TrafficDeskGateway.name);
   private server?: Server;
   private snapshotProvider?: () => TrafficLogEntry[];
+  private consoleSnapshotProvider?: () => ConsoleLogEntry[];
 
   constructor(
     @Inject(TRAFFIC_DESK_OPTIONS)
@@ -29,6 +33,10 @@ export class TrafficDeskGateway {
 
   setSnapshotProvider(provider: () => TrafficLogEntry[]): void {
     this.snapshotProvider = provider;
+  }
+
+  setConsoleSnapshotProvider(provider: () => ConsoleLogEntry[]): void {
+    this.consoleSnapshotProvider = provider;
   }
 
   /**
@@ -51,6 +59,9 @@ export class TrafficDeskGateway {
       if (this.snapshotProvider) {
         client.emit(TRAFFIC_DESK_EVENT_SNAPSHOT, this.snapshotProvider());
       }
+      if (this.consoleSnapshotProvider) {
+        client.emit(TRAFFIC_DESK_EVENT_CONSOLE_SNAPSHOT, this.consoleSnapshotProvider());
+      }
     });
 
     this.logger.log(`Traffic desk WebSocket server attached (namespace: ${namespace})`);
@@ -63,5 +74,14 @@ export class TrafficDeskGateway {
 
     const namespace = this.options.websocketNamespace || "/";
     this.server.of(namespace).emit(TRAFFIC_DESK_EVENT_NEW, entry);
+  }
+
+  broadcastConsoleEntry(entry: ConsoleLogEntry): void {
+    if (!this.options.enableWebsocket || !this.server) {
+      return;
+    }
+
+    const namespace = this.options.websocketNamespace || "/";
+    this.server.of(namespace).emit(TRAFFIC_DESK_EVENT_CONSOLE_NEW, entry);
   }
 }

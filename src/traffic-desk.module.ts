@@ -1,10 +1,14 @@
 import { DynamicModule, Global, Module, NestModule } from "@nestjs/common";
 import { APP_FILTER, APP_INTERCEPTOR } from "@nestjs/core";
-import { TRAFFIC_DESK_OPTIONS, TRAFFIC_DESK_STORE } from "./constants";
+import {
+  TRAFFIC_DESK_OPTIONS,
+  TRAFFIC_DESK_STORE,
+  TRAFFIC_DESK_CONSOLE_STORE,
+} from "./constants";
 import {
   defaultTrafficDeskOptions,
   ResolvedTrafficDeskModuleOptions,
-  TrafficDeskModuleOptions
+  TrafficDeskModuleOptions,
 } from "./types/traffic-desk-options";
 import { InMemoryRingBufferStore } from "./storage/in-memory-ring-buffer.store";
 import { FileTrafficLogStore } from "./storage/file-traffic-log.store";
@@ -14,6 +18,8 @@ import { TrafficDeskGateway } from "./traffic-desk.gateway";
 import { TrafficHttpBinding } from "./traffic-http.binding";
 import { OutgoingHttpInstrumentation } from "./outgoing-http.instrumentation";
 import { TrafficExceptionFilter } from "./traffic-exception.filter";
+import { ConsoleInstrumentation } from "./console.instrumentation";
+import { InMemoryConsoleBufferStore } from "./storage/in-memory-console-buffer.store";
 import { join } from "path";
 
 @Global()
@@ -26,13 +32,13 @@ export class NestTrafficDeskModule implements NestModule {
   static register(options: TrafficDeskModuleOptions = {}): DynamicModule {
     const mergedOptions = {
       ...defaultTrafficDeskOptions,
-      ...options
+      ...options,
     };
 
     // Support both ignorePaths and excludePaths (user-facing alias)
     const ignorePaths = [
       ...(mergedOptions.ignorePaths || []),
-      ...(mergedOptions.excludePaths || [])
+      ...(mergedOptions.excludePaths || []),
     ].filter((p, idx, self) => self.indexOf(p) === idx); // dedupe
 
     const merged = {
@@ -52,7 +58,7 @@ export class NestTrafficDeskModule implements NestModule {
       providers: [
         {
           provide: TRAFFIC_DESK_OPTIONS,
-          useValue: merged
+          useValue: merged,
         },
         {
           provide: TRAFFIC_DESK_STORE,
@@ -64,30 +70,44 @@ export class NestTrafficDeskModule implements NestModule {
             if (merged.storage.type === "file") {
               return new FileTrafficLogStore({
                 maxEntries: merged.maxEntries,
-                filePath: merged.storage.filePath ?? join(process.cwd(), "traffic-desk.log.jsonl"),
-                maxFileSizeBytes: merged.storage.maxFileSizeBytes ?? 5 * 1024 * 1024,
-                maxFiles: merged.storage.maxFiles ?? 3
+                filePath:
+                  merged.storage.filePath ??
+                  join(process.cwd(), "traffic-desk.log.jsonl"),
+                maxFileSizeBytes:
+                  merged.storage.maxFileSizeBytes ?? 5 * 1024 * 1024,
+                maxFiles: merged.storage.maxFiles ?? 3,
               });
             }
 
             return new InMemoryRingBufferStore(merged.maxEntries);
-          }
+          },
+        },
+        {
+          provide: TRAFFIC_DESK_CONSOLE_STORE,
+          useFactory: () =>
+            new InMemoryConsoleBufferStore(merged.maxConsoleEntries),
         },
         TrafficDeskGateway,
         TrafficLoggingService,
+        ConsoleInstrumentation,
         OutgoingHttpInstrumentation,
         TrafficExceptionFilter,
         TrafficHttpBinding,
         {
           provide: APP_FILTER,
-          useClass: TrafficExceptionFilter
+          useClass: TrafficExceptionFilter,
         },
         {
           provide: APP_INTERCEPTOR,
-          useClass: TrafficInterceptor
-        }
+          useClass: TrafficInterceptor,
+        },
       ],
-      exports: [TRAFFIC_DESK_OPTIONS, TRAFFIC_DESK_STORE, TrafficLoggingService]
+      exports: [
+        TRAFFIC_DESK_OPTIONS,
+        TRAFFIC_DESK_STORE,
+        TrafficLoggingService,
+        TRAFFIC_DESK_CONSOLE_STORE,
+      ],
     };
   }
 }

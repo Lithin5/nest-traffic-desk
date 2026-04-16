@@ -3,3 +3,7 @@ export const TRAFFIC_DESK_STORE = Symbol("TRAFFIC_DESK_STORE");
 export const TRAFFIC_DESK_EVENT_NEW = "traffic:new";
 export const TRAFFIC_DESK_EVENT_SNAPSHOT = "traffic:snapshot";
 export const TRAFFIC_DESK_REQUEST_CAPTURED_FLAG = "__trafficDeskCaptured";
+
+export const TRAFFIC_DESK_CONSOLE_STORE = Symbol("TRAFFIC_DESK_CONSOLE_STORE");
+export const TRAFFIC_DESK_EVENT_CONSOLE_NEW = "console:new";
+export const TRAFFIC_DESK_EVENT_CONSOLE_SNAPSHOT = "console:snapshot";

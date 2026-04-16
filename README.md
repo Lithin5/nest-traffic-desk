@@ -13,16 +13,19 @@ A plug-and-play NestJS module that captures every inbound and outbound HTTP requ
 
 `nest-traffic-desk` registers a global interceptor, a REST data endpoint, and a WebSocket gateway in your NestJS app. A built-in React SPA (served by Nest itself) connects to the WebSocket and renders an inspectable, filterable log of all HTTP traffic in real time.
 
-**Key capabilities**
+- **Key capabilities**
 
-- Live request stream via WebSocket with automatic reconnection
-- Captures incoming and outgoing HTTP traffic in a unified view
-- Collapsible JSON inspector for request/response headers and bodies
-- Filterable by path, HTTP method, status code, direction, and duration
-- Light and dark theme with local persistence
-- Pluggable storage: in-memory ring buffer or file-backed JSONL with rotation
-- Sensitive headers redacted by default
-- No extra process, no external service — runs inside your app
+- **Live HTTP stream**: Real-time request/response monitoring via WebSockets.
+- **Console Log Interception**: Capture `console.log`, `info`, `warn`, `error`, etc. from your application.
+- **Outbound HTTP Patching**: Monitor external requests made via global `fetch`.
+- **Advanced Filtering**: Filter by path, method, status class (e.g., `4xx`), direction, and duration.
+- **JSON Inspector**: Beautifully formatted and searchable request/response payloads.
+- **Persistent Annotations**: Add client-side notes to specific logs for easier debugging.
+- **Integrated Analytics**: Live stats bar showing request counts, error rates, and average latency.
+- **Smart Throttling**: Pause the live feed to focus on a specific trace without losing incoming data.
+- **Exporting**: Download filtered logs as JSON for post-mortem analysis.
+- **Modern UI**: High-end light/dark modes with glassmorphism and local persistence.
+- **Zero Config**: Pluggable storage (memory/file) that works out of the box.
 
 ---
 
@@ -84,6 +87,8 @@ Start your app and open `http://localhost:3000/_logs` in a browser.
 | `captureResponseBody` | `boolean` | `true` | Whether to capture response bodies. |
 | `redactHeaders` | `string[]` | `['authorization','cookie','set-cookie','x-api-key']` | Header names to redact from logs. Values are replaced with `[REDACTED]`. |
 | `enableOutgoingHttp` | `boolean` | `false` | Patch the global `fetch` to capture outbound HTTP calls. |
+| `captureConsoleLogs` | `boolean` | `true` | Instrument the global `console` to capture application logs. |
+| `maxConsoleEntries` | `number` | `1000` | Maximum number of console logs to keep in memory. |
 | `uiBasePath` | `string` | `'/_logs'` | URL path where the dashboard SPA is served. |
 | `dataPath` | `string` | `'/_logs/data'` | URL path for the REST data endpoint. |
 | `enableUi` | `boolean` | `true` | Whether to serve the dashboard SPA. |
@@ -92,7 +97,7 @@ Start your app and open `http://localhost:3000/_logs` in a browser.
 | `ignorePaths` | `string[]` | `['/_logs','/_logs/data','/socket.io']` | Paths excluded from traffic capture. |
 | `storage` | `TrafficDeskStorageOptions` | `{ type: 'memory' }` | Storage backend. See [Storage](#storage) below. |
 | `storeFactory` | `() => TrafficLogStore` | — | Factory for a fully custom store implementation. Takes precedence over `storage`. |
-| `uiDistPath` | `string` | `''` | Absolute path to a custom-built SPA asset directory. Leave empty to use the bundled UI. |
+| `uiDistPath` | `string` | `''` | Absolute path to a custom-built SPA asset directory. Leave empty to use bundled UI. |
 
 ---
 
@@ -163,6 +168,31 @@ NestTrafficDeskModule.register({
 
 ---
 
+## Capturing Console Logs
+
+If `captureConsoleLogs` is enabled (default), `nest-traffic-desk` monkey-patches the global `console` object (log, error, warn, info, debug, trace). Every call is formatted, timestamped, and broadcast to the dashboard in real-time.
+
+- Captured logs include the stack trace from the call site.
+- Complex objects/errors are processed to be safe for WebSocket transmission.
+- Server-side logs are stored in a dedicated in-memory buffer (limit configurable via `maxConsoleEntries`).
+
+---
+
+## Log Annotations
+
+The dashboard allows you to add persistent notes (annotations) to any traffic log entry. 
+
+- **Persistence**: Notes are stored in your browser's `localStorage` and remain available as long as the log entry ID exists.
+- **Visibility**: A small note icon appears in the log list indicating which entries have annotations.
+
+---
+
+## Performance & Throttling
+
+The dashboard includes a **Pause** feature that suspends the UI from rendering new incoming logs while you are inspecting a specific entry. This does *not* stop the backend from capturing data; it only stabilizes the UI state.
+
+---
+
 ## Capturing Guard/Auth Errors (401/403)
 
 `nest-traffic-desk` includes a global exception filter so HTTP errors that happen before controller handlers (for example `JwtAuthGuard` failures) are still captured and shown in the UI.
@@ -212,7 +242,6 @@ The data endpoint supports the following query parameters for server-side filter
 | `q` | `string` | Substring match on the request path. |
 | `method` | `string` | Comma-separated HTTP methods, e.g. `GET,POST`. |
 | `status` | `string` | Exact code (`500`) or class (`4xx`, `2xx`). |
-| `direction` | `string` | `incoming` or `outgoing`. |
 | `sort` | `string` | `asc` or `desc` (default `desc`). |
 | `limit` | `number` | Maximum number of items to return. |
 
@@ -251,6 +280,8 @@ The module emits two events on the configured Socket.IO namespace.
 |---|---|---|
 | `traffic:snapshot` | `TrafficLogEntry[]` | Full current log emitted to a client immediately on connect. |
 | `traffic:new` | `TrafficLogEntry` | Emitted to all connected clients each time a new entry is logged. |
+| `console:snapshot` | `ConsoleLogEntry[]` | Full current console log buffer emitted immediately on connect. |
+| `console:new` | `ConsoleLogEntry` | Emitted each time a new console message is intercepted. |
 
 The dashboard handles reconnection automatically with exponential backoff and displays a live connection status indicator.
 

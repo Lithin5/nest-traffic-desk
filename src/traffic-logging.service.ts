@@ -15,9 +15,9 @@ export class TrafficLoggingService implements OnModuleInit {
     private readonly store: TrafficLogStore,
     @Inject(TRAFFIC_DESK_OPTIONS)
     private readonly options: ResolvedTrafficDeskModuleOptions,
-    private readonly gateway: TrafficDeskGateway
+    private readonly gateway: TrafficDeskGateway,
   ) {}
-  
+
   private readonly dynamicIgnorePaths = new Set<string>();
 
   onModuleInit(): void {
@@ -31,7 +31,9 @@ export class TrafficLoggingService implements OnModuleInit {
 
     if (this.isExcluded(entry.path)) {
       if (entry.statusCode >= 400) {
-        this.logger.warn(`[Excluded] ${entry.method} ${entry.path} ${entry.statusCode} - would have been logged as error`);
+        this.logger.warn(
+          `[Excluded] ${entry.method} ${entry.path} ${entry.statusCode} - would have been logged as error`,
+        );
       }
       return;
     }
@@ -41,31 +43,76 @@ export class TrafficLoggingService implements OnModuleInit {
   }
 
   isExcluded(path: string): boolean {
-    if (this.options.ignorePaths.some((ignored) => path.startsWith(ignored))) {
-      return true;
+    const rawPath = path ?? "";
+    const normalizedPath = this.normalizeIgnorePath(rawPath);
+    const candidates = [rawPath, normalizedPath].filter(Boolean);
+
+    for (const ignored of this.getAllIgnorePaths()) {
+      if (candidates.some((candidate) => candidate.startsWith(ignored))) {
+        return true;
+      }
     }
-    for (const ignored of this.dynamicIgnorePaths) {
-      if (path.startsWith(ignored)) return true;
-    }
+
     return false;
   }
 
   addIgnorePath(path: string): void {
-    this.dynamicIgnorePaths.add(path);
+    const normalized = this.normalizeIgnorePath(path);
+    if (!normalized) return;
+    this.dynamicIgnorePaths.add(normalized);
   }
 
   removeIgnorePath(path: string): void {
-    this.dynamicIgnorePaths.delete(path);
+    const normalized = this.normalizeIgnorePath(path);
+    if (!normalized) return;
+    this.dynamicIgnorePaths.delete(normalized);
   }
 
   getIgnorePaths(): string[] {
-    return [
-      ...this.options.ignorePaths,
-      ...Array.from(this.dynamicIgnorePaths)
-    ];
+    return this.getAllIgnorePaths();
   }
 
-  query(filters: TrafficFilterQuery): { total: number; filteredCount: number; items: TrafficLogEntry[] } {
+  private getAllIgnorePaths(): string[] {
+    const combined = [
+      ...this.options.ignorePaths.map((path) => this.normalizeIgnorePath(path)),
+      ...Array.from(this.dynamicIgnorePaths),
+    ].filter(Boolean);
+    return Array.from(new Set(combined));
+  }
+
+  private normalizeIgnorePath(path: string): string {
+    const trimmed = (path ?? "").trim();
+    if (!trimmed) return "";
+
+    let normalized = trimmed;
+    try {
+      // Accept full URLs (e.g. http://host/api/foo) and keep only pathname.
+      normalized =
+        new URL(trimmed, "http://traffic-desk.local").pathname || trimmed;
+    } catch {
+      normalized = trimmed;
+    }
+
+    const withoutFragment = normalized.split("#")[0];
+    const withoutQuery = withoutFragment.split("?")[0];
+    if (!withoutQuery) return "";
+
+    const withLeadingSlash = withoutQuery.startsWith("/")
+      ? withoutQuery
+      : `/${withoutQuery}`;
+
+    if (withLeadingSlash.length > 1 && withLeadingSlash.endsWith("/")) {
+      return withLeadingSlash.slice(0, -1);
+    }
+
+    return withLeadingSlash;
+  }
+
+  query(filters: TrafficFilterQuery): {
+    total: number;
+    filteredCount: number;
+    items: TrafficLogEntry[];
+  } {
     const all = this.store.getAll();
     let rows = all.filter((entry) => {
       if (filters.q) {
@@ -97,7 +144,8 @@ export class TrafficLoggingService implements OnModuleInit {
     });
 
     rows = rows.sort((a, b) => {
-      const delta = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+      const delta =
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
       return filters.sort === "asc" ? delta : -delta;
     });
 
@@ -108,7 +156,7 @@ export class TrafficLoggingService implements OnModuleInit {
     return {
       total: all.length,
       filteredCount: rows.length,
-      items: rows
+      items: rows,
     };
   }
 }

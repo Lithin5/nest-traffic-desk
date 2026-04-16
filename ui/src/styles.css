@@ -3,17 +3,17 @@
 /* ─── Design Tokens ──────────────────────────────────────────────── */
 :root {
   /* Near-white zinc base with a whisper of violet at the origin */
-  --bg:           #f8f8fb;
-  --bg-mesh:      radial-gradient(ellipse at 22% -8%, #ede9fe 0%, #f3f0ff 22%, #f8f8fb 58%);
+  --bg:           #F4F7FC;
+  --bg-mesh:      linear-gradient(180deg, #FCFEFF 0%, #F4F7FC 50%, #EEF3FA 100%);
   --panel:        rgba(255, 255, 255, 0.92);
-  --panel-solid:  #ffffff;
+  --panel-solid:  #FFFFFF;
   --panel-alt:    rgba(255, 255, 255, 0.98);
   --panel-hover:  rgba(250, 250, 253, 0.99);
   --glass:        rgba(0, 0, 0, 0.022);
   --glass-border: rgba(0, 0, 0, 0.05);
 
-  --text:         #09090b;
-  --text-muted:   #71717a;
+  --text:         #12202D;
+  --text-muted:   #4E6075;
   --text-dim:     #a1a1aa;
 
   /* Indigo — the signature of modern premium tooling */
@@ -22,8 +22,11 @@
   --accent-dim:   rgba(99, 102, 241, 0.07);
   --accent2:      #8b5cf6;
 
-  --border:       rgba(228, 228, 231, 0.9);
+  --border:       rgba(18, 52, 77, 0.12);
   --border-hover: rgba(99, 102, 241, 0.35);
+  
+  --soft-accent-section: rgba(217, 119, 69, 0.12);
+  --section-divider:     rgba(18, 52, 77, 0.08);
 
   --danger:       #e11d48;
   --danger-bg:    rgba(225, 29, 72, 0.07);
@@ -50,7 +53,7 @@
 
   /* Component-specific tokens */
   --bg-input:          #ffffff;
-  --bg-chip:           rgba(244, 244, 245, 0.85);
+  --bg-chip:           rgba(255, 255, 255, 0.92);
   --bg-code:           #fafafa;
   --bg-viewer-header:  rgba(250, 250, 252, 0.97);
   --bg-filter-bar:     rgba(255, 255, 255, 0.98);
@@ -69,17 +72,17 @@
 
 /* ─── Dark Theme ─────────────────────────────────────────────────── */
 html[data-theme="dark"] {
-  --bg:           #080e1c;
-  --bg-mesh:      radial-gradient(ellipse at 18% 0%, #0d2040 0%, #080d1a 50%, #040810 100%);
-  --panel:        rgba(14, 22, 42, 0.82);
-  --panel-solid:  #0e1a2e;
-  --panel-alt:    rgba(18, 28, 50, 0.95);
-  --panel-hover:  rgba(22, 36, 64, 0.9);
+  --bg:           #0B1220;
+  --bg-mesh:      linear-gradient(180deg, #0B1220 0%, #0E1728 52%, #0B1424 100%);
+  --panel:        rgba(18, 28, 46, 0.82);
+  --panel-solid:  #121C2E;
+  --panel-alt:    rgba(18, 28, 46, 0.95);
+  --panel-hover:  rgba(23, 36, 58, 0.9);
   --glass:        rgba(255, 255, 255, 0.035);
   --glass-border: rgba(255, 255, 255, 0.07);
 
-  --text:         #e2e8f6;
-  --text-muted:   #7a90b3;
+  --text:         #ECF2FF;
+  --text-muted:   #B4C1D7;
   --text-dim:     #3d5070;
 
   --accent:       #2dd4bf;
@@ -87,8 +90,11 @@ html[data-theme="dark"] {
   --accent-dim:   rgba(45, 212, 191, 0.08);
   --accent2:      #818cf8;
 
-  --border:       rgba(45, 80, 140, 0.35);
+  --border:       rgba(231, 240, 255, 0.14);
   --border-hover: rgba(45, 212, 191, 0.3);
+  
+  --soft-accent-section: rgba(185, 92, 46, 0.28);
+  --section-divider:     rgba(217, 231, 255, 0.12);
 
   --danger:       #f87171;
   --danger-bg:    rgba(248, 113, 113, 0.12);
@@ -104,7 +110,7 @@ html[data-theme="dark"] {
   --shadow-glow:  0 0 20px rgba(45,212,191,0.15);
 
   --bg-input:          rgba(10, 18, 36, 0.8);
-  --bg-chip:           rgba(15, 25, 48, 0.6);
+  --bg-chip:           rgba(23, 36, 58, 0.94);
   --bg-code:           rgba(4, 8, 18, 0.8);
   --bg-viewer-header:  rgba(10, 18, 36, 0.6);
   --bg-filter-bar:     rgba(8, 14, 28, 0.94);
