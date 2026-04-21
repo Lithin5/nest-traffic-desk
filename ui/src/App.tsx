@@ -447,17 +447,25 @@ export function App() {
             <button className="topbar-btn" style={{ background: "var(--accent)", color: "white" }} onClick={() => { if (newExcludePath) { blockPath(newExcludePath); setNewExcludePath(""); } }}>Add Path</button>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-            {config?.ignorePaths?.map(path => (
+            {config?.ignorePaths?.map(path => {
+              const dynamic = config.dynamicIgnorePaths;
+              const removable =
+                dynamic === undefined ? true : dynamic.includes(path);
+              return (
               <div key={path} className="chip active" style={{ display: "flex", alignItems: "center", gap: "0.4rem", padding: "0.3rem 0.7rem" }}>
                 {path}
+                {removable ? (
                 <button
+                  type="button"
                   style={{ background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 0, fontSize: "0.9rem" }}
                   onClick={() => unblockPath(path)}
+                  aria-label={`Stop ignoring ${path}`}
                 >
                   ✕
                 </button>
+                ) : null}
               </div>
-            ))}
+            );})}
             {(!config?.ignorePaths || config.ignorePaths.length === 0) && (
               <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>No paths are currently ignored. Error responses (4xx/5xx) will always be shown.</div>
             )}

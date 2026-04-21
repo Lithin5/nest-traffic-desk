@@ -17,6 +17,15 @@ export class ConsoleInstrumentation implements OnModuleInit, OnModuleDestroy {
   private originalTrace = console.trace;
   
   private isInstrumented = false;
+  private processHandlersInstalled = false;
+
+  private readonly onUncaughtException = (error: Error): void => {
+    this.recordRuntimeError("uncaughtException", error);
+  };
+
+  private readonly onUnhandledRejection = (reason: unknown): void => {
+    this.recordRuntimeError("unhandledRejection", reason);
+  };
 
   constructor(
     @Inject(TRAFFIC_DESK_CONSOLE_STORE)
@@ -27,14 +36,22 @@ export class ConsoleInstrumentation implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    const exposeConsoleFeed =
+      this.options.captureConsoleLogs || this.options.captureRuntimeErrors;
+    if (exposeConsoleFeed) {
+      this.gateway.setConsoleSnapshotProvider(() => this.store.getAll());
+    }
     if (this.options.captureConsoleLogs) {
       this.instrument();
-      this.gateway.setConsoleSnapshotProvider(() => this.store.getAll());
+    }
+    if (this.options.captureRuntimeErrors) {
+      this.installProcessErrorHandlers();
     }
   }
 
   onModuleDestroy(): void {
     this.restore();
+    this.removeProcessErrorHandlers();
   }
 
   private instrument(): void {
@@ -48,6 +65,48 @@ export class ConsoleInstrumentation implements OnModuleInit, OnModuleDestroy {
     console.trace = this.createHook("trace", this.originalTrace);
 
     this.isInstrumented = true;
+  }
+
+  private installProcessErrorHandlers(): void {
+    if (this.processHandlersInstalled) return;
+    process.on("uncaughtException", this.onUncaughtException);
+    process.on("unhandledRejection", this.onUnhandledRejection);
+    this.processHandlersInstalled = true;
+  }
+
+  private removeProcessErrorHandlers(): void {
+    if (!this.processHandlersInstalled) return;
+    process.off("uncaughtException", this.onUncaughtException);
+    process.off("unhandledRejection", this.onUnhandledRejection);
+    this.processHandlersInstalled = false;
+  }
+
+  private recordRuntimeError(kind: string, reason: unknown): void {
+    try {
+      const message =
+        reason instanceof Error
+          ? reason.message
+          : typeof reason === "string"
+            ? reason
+            : util.inspect(reason, { depth: 3 });
+      const stack = reason instanceof Error ? reason.stack : undefined;
+      const entry = {
+        id: randomUUID(),
+        level: "error" as const,
+        message: `[${kind}] ${message}`,
+        timestamp: new Date().toISOString(),
+        context: kind,
+        stack,
+        args:
+          reason instanceof Error
+            ? [{ message: reason.message, stack: reason.stack, name: reason.name }]
+            : [reason]
+      };
+      this.store.add(entry);
+      this.gateway.broadcastConsoleEntry(entry);
+    } catch {
+      // ignore
+    }
   }
 
   private restore(): void {

@@ -31,6 +31,8 @@ export interface TrafficDeskConfig {
   dataPath: string;
   websocketNamespace: string;
   ignorePaths: string[];
+  /** Subset of ignorePaths that can be removed via the UI (runtime-added). Omitted by older servers → UI treats all as removable. */
+  dynamicIgnorePaths?: string[];
 }
 
 export interface FilterState {

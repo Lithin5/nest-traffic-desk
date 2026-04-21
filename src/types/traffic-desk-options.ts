@@ -22,6 +22,8 @@ export interface TrafficDeskModuleOptions {
   redactHeaders?: string[];
   enableOutgoingHttp?: boolean;
   captureConsoleLogs?: boolean;
+  /** Uncaught exceptions and unhandled promise rejections → console log store / UI */
+  captureRuntimeErrors?: boolean;
   maxConsoleEntries?: number;
   uiBasePath?: string;
   dataPath?: string;
@@ -53,6 +55,7 @@ export const defaultTrafficDeskOptions: ResolvedTrafficDeskModuleOptions = {
   redactHeaders: ["authorization", "cookie", "set-cookie", "x-api-key"],
   enableOutgoingHttp: false,
   captureConsoleLogs: true,
+  captureRuntimeErrors: true,
   maxConsoleEntries: 1000,
   uiBasePath: "/_logs",
   dataPath: "/_logs/data",

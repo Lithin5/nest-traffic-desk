@@ -72,6 +72,11 @@ export class TrafficLoggingService implements OnModuleInit {
     return this.getAllIgnorePaths();
   }
 
+  /** Paths added at runtime (e.g. from the dashboard); these are the only ones DELETE /ignore removes. */
+  getDynamicIgnorePaths(): string[] {
+    return Array.from(this.dynamicIgnorePaths);
+  }
+
   private getAllIgnorePaths(): string[] {
     const combined = [
       ...this.options.ignorePaths.map((path) => this.normalizeIgnorePath(path)),

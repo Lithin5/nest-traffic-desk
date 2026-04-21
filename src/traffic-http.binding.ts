@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, Optional } from "@nestjs/comm
 import type { AbstractHttpAdapter } from "@nestjs/core";
 import type { HttpAdapterHost } from "@nestjs/core";
 import { existsSync, readFileSync, statSync } from "fs";
+import type { IncomingMessage } from "http";
 import { extname, join, normalize } from "path";
 import { TRAFFIC_DESK_OPTIONS } from "./constants";
 import { ResolvedTrafficDeskModuleOptions } from "./types/traffic-desk-options";
@@ -103,22 +104,36 @@ export class TrafficHttpBinding implements OnModuleInit {
       adapter.reply(res, {
         dataPath: this.options.dataPath,
         websocketNamespace: this.options.websocketNamespace,
-        ignorePaths: this.logging.getIgnorePaths()
+        ignorePaths: this.logging.getIgnorePaths(),
+        dynamicIgnorePaths: this.logging.getDynamicIgnorePaths()
       });
     });
 
-    adapter.post(`${uiBasePath}/ignore`, (req: any, res: any) => {
-      const path = req.body?.path;
+    adapter.post(`${uiBasePath}/ignore`, async (req: any, res: any) => {
+      let body: Record<string, unknown>;
+      try {
+        body = await this.parseJsonBodyIfNeeded(req);
+      } catch {
+        adapter.reply(res, { success: false, message: "Invalid JSON body" }, 400);
+        return;
+      }
+      const pathRaw = body.path;
+      const path = typeof pathRaw === "string" ? pathRaw : undefined;
       if (path) this.logging.addIgnorePath(path);
       adapter.reply(res, { success: true });
     });
 
-    adapter.delete(`${uiBasePath}/ignore`, (req: any, res: any) => {
-      const path = req.body?.path;
-      // In some adapters, DELETE body might be in req.query or not available, 
-      // but we'll try to get it from body or query.
-      const pathValue = req.body?.path ?? this.getQuery(req).path;
-      if (pathValue && typeof pathValue === 'string') {
+    adapter.delete(`${uiBasePath}/ignore`, async (req: any, res: any) => {
+      let body: Record<string, unknown>;
+      try {
+        body = await this.parseJsonBodyIfNeeded(req);
+      } catch {
+        adapter.reply(res, { success: false, message: "Invalid JSON body" }, 400);
+        return;
+      }
+      const bodyPath = typeof body.path === "string" ? body.path : undefined;
+      const pathValue = bodyPath ?? this.asString(this.getQuery(req).path);
+      if (pathValue && typeof pathValue === "string") {
         this.logging.removeIgnorePath(pathValue);
       }
       adapter.reply(res, { success: true });
@@ -270,5 +285,46 @@ export class TrafficHttpBinding implements OnModuleInit {
 
   private ensureLeadingSlash(path: string): string {
     return path.startsWith("/") ? path : `/${path}`;
+  }
+
+  /**
+   * Traffic desk registers these routes from the provider constructor, which runs before
+   * Nest/Express applies `express.json()`, so `req.body` is often undefined here. Read the
+   * raw stream when needed so JSON bodies still parse.
+   */
+  private async parseJsonBodyIfNeeded(req: {
+    body?: unknown;
+    on?: IncomingMessage["on"];
+  }): Promise<Record<string, unknown>> {
+    const b = req.body;
+    if (b != null && typeof b === "object" && !Buffer.isBuffer(b)) {
+      return b as Record<string, unknown>;
+    }
+    if (typeof b === "string") {
+      const t = b.trim();
+      if (!t) return {};
+      return JSON.parse(t) as Record<string, unknown>;
+    }
+    if (typeof req.on !== "function") {
+      return {};
+    }
+    const incoming = req as IncomingMessage;
+    const chunks: Buffer[] = [];
+    return new Promise((resolve, reject) => {
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.on("end", () => {
+        try {
+          const raw = Buffer.concat(chunks).toString("utf8").trim();
+          if (!raw) {
+            resolve({});
+            return;
+          }
+          resolve(JSON.parse(raw) as Record<string, unknown>);
+        } catch (err) {
+          reject(err);
+        }
+      });
+      incoming.on("error", reject);
+    });
   }
 }

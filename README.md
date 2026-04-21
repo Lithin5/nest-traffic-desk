@@ -16,7 +16,7 @@ A plug-and-play NestJS module that captures every inbound and outbound HTTP requ
 - **Key capabilities**
 
 - **Live HTTP stream**: Real-time request/response monitoring via WebSockets.
-- **Console Log Interception**: Capture `console.log`, `info`, `warn`, `error`, etc. from your application.
+- **Console & process errors**: Capture `console.log` / `warn` / `error` / etc., plus `uncaughtException` and `unhandledRejection` (optional; see [Capturing console & runtime errors](#capturing-console--runtime-errors)).
 - **Outbound HTTP Patching**: Monitor external requests made via global `fetch`.
 - **Advanced Filtering**: Filter by path, method, status class (e.g., `4xx`), direction, and duration.
 - **JSON Inspector**: Beautifully formatted and searchable request/response payloads.
@@ -88,13 +88,15 @@ Start your app and open `http://localhost:3000/_logs` in a browser.
 | `redactHeaders` | `string[]` | `['authorization','cookie','set-cookie','x-api-key']` | Header names to redact from logs. Values are replaced with `[REDACTED]`. |
 | `enableOutgoingHttp` | `boolean` | `false` | Patch the global `fetch` to capture outbound HTTP calls. |
 | `captureConsoleLogs` | `boolean` | `true` | Instrument the global `console` to capture application logs. |
+| `captureRuntimeErrors` | `boolean` | `true` | Register `process` listeners for `uncaughtException` and `unhandledRejection` and append them to the same console feed as `console.error` (with `context` set on the entry). |
 | `maxConsoleEntries` | `number` | `1000` | Maximum number of console logs to keep in memory. |
 | `uiBasePath` | `string` | `'/_logs'` | URL path where the dashboard SPA is served. |
 | `dataPath` | `string` | `'/_logs/data'` | URL path for the REST data endpoint. |
 | `enableUi` | `boolean` | `true` | Whether to serve the dashboard SPA. |
 | `enableWebsocket` | `boolean` | `true` | Whether to attach the Socket.IO gateway. |
 | `websocketNamespace` | `string` | `'/'` | Socket.IO namespace for the live feed. |
-| `ignorePaths` | `string[]` | `['/_logs','/_logs/data','/socket.io']` | Paths excluded from traffic capture. |
+| `ignorePaths` | `string[]` | `['/_logs','/_logs/data','/socket.io']` | Paths excluded from traffic capture (prefix match after normalization). |
+| `excludePaths` | `string[]` | — | **Deprecated.** Merged into `ignorePaths` at register time; prefer `ignorePaths`. |
 | `storage` | `TrafficDeskStorageOptions` | `{ type: 'memory' }` | Storage backend. See [Storage](#storage) below. |
 | `storeFactory` | `() => TrafficLogStore` | — | Factory for a fully custom store implementation. Takes precedence over `storage`. |
 | `uiDistPath` | `string` | `''` | Absolute path to a custom-built SPA asset directory. Leave empty to use bundled UI. |
@@ -134,18 +136,34 @@ NestTrafficDeskModule.register({
 Implement the `TrafficLogStore` interface to use any storage backend (database, Redis, S3, etc.).
 
 ```typescript
-import { TrafficLogStore, TrafficLogEntry, TrafficFilterQuery } from 'nest-traffic-desk';
+import { TrafficLogStore, TrafficLogEntry } from 'nest-traffic-desk';
 
 class MyCustomStore implements TrafficLogStore {
-  async append(entry: TrafficLogEntry): Promise<void> { /* ... */ }
-  async query(filter: TrafficFilterQuery): Promise<{ total: number; filteredCount: number; items: TrafficLogEntry[] }> { /* ... */ }
-  async clear(): Promise<void> { /* ... */ }
+  private entries: TrafficLogEntry[] = [];
+
+  add(entry: TrafficLogEntry): void {
+    this.entries.push(entry);
+  }
+
+  getAll(): TrafficLogEntry[] {
+    return [...this.entries];
+  }
+
+  clear(): void {
+    this.entries = [];
+  }
+
+  count(): number {
+    return this.entries.length;
+  }
 }
 
 NestTrafficDeskModule.register({
   storeFactory: () => new MyCustomStore(),
-})
+});
 ```
+
+Filtering for the REST endpoint and UI is applied in `TrafficLoggingService` after `getAll()`; custom stores only need to implement the four methods above.
 
 ---
 
@@ -168,13 +186,101 @@ NestTrafficDeskModule.register({
 
 ---
 
-## Capturing Console Logs
+## Capturing console & runtime errors
 
-If `captureConsoleLogs` is enabled (default), `nest-traffic-desk` monkey-patches the global `console` object (log, error, warn, info, debug, trace). Every call is formatted, timestamped, and broadcast to the dashboard in real-time.
+### Console methods
 
-- Captured logs include the stack trace from the call site.
-- Complex objects/errors are processed to be safe for WebSocket transmission.
-- Server-side logs are stored in a dedicated in-memory buffer (limit configurable via `maxConsoleEntries`).
+If `captureConsoleLogs` is `true` (default), the library wraps global `console` methods (`log`, `error`, `warn`, `info`, `debug`, `trace`). Each call is formatted, timestamped, and pushed to the console buffer and WebSocket feed.
+
+- Call-site stack traces are attached when possible.
+- Arguments are sanitized so complex values are safe to serialize over Socket.IO.
+- Buffer size is capped by `maxConsoleEntries`.
+
+### Process-level runtime errors
+
+If `captureRuntimeErrors` is `true` (default), the library also registers:
+
+- `process.on('uncaughtException', …)`
+- `process.on('unhandledRejection', …)`
+
+Those events are stored as console entries with `level: 'error'`, `message` prefixed with `[uncaughtException]` or `[unhandledRejection]`, and `context` set to the same label. They appear in the dashboard console stream and in `console:snapshot` / `console:new` events.
+
+You can capture **only** process-level errors (no `console` monkey-patch) with:
+
+```typescript
+NestTrafficDeskModule.register({
+  captureConsoleLogs: false,
+  captureRuntimeErrors: true,
+});
+```
+
+To turn off both:
+
+```typescript
+NestTrafficDeskModule.register({
+  captureConsoleLogs: false,
+  captureRuntimeErrors: false,
+});
+```
+
+---
+
+## More configuration examples
+
+### Development: full capture
+
+```typescript
+NestTrafficDeskModule.register({
+  maxEntries: 2000,
+  enableOutgoingHttp: true,
+  captureRequestBody: true,
+  captureResponseBody: true,
+  captureConsoleLogs: true,
+  captureRuntimeErrors: true,
+});
+```
+
+### Staging / locked-down dashboard
+
+Serve the UI and data under a custom prefix and skip bodies if payloads are sensitive:
+
+```typescript
+NestTrafficDeskModule.register({
+  uiBasePath: '/internal/traffic-desk',
+  dataPath: '/internal/traffic-desk/data',
+  ignorePaths: ['/internal/traffic-desk', '/internal/traffic-desk/data', '/socket.io'],
+  captureRequestBody: false,
+  captureResponseBody: false,
+  redactHeaders: ['authorization', 'cookie', 'set-cookie', 'x-api-key', 'proxy-authorization'],
+});
+```
+
+> After changing `uiBasePath` / `dataPath`, extend `ignorePaths` so the desk does not log its own traffic (see defaults above).
+
+### File persistence + outbound `fetch`
+
+```typescript
+NestTrafficDeskModule.register({
+  enableOutgoingHttp: true,
+  storage: {
+    type: 'file',
+    filePath: './var/traffic-desk.jsonl',
+    maxFileSizeBytes: 10 * 1024 * 1024,
+    maxFiles: 5,
+  },
+});
+```
+
+### API-only (no SPA, no Socket.IO)
+
+Useful if you only want `GET …/data` JSON from automation or a reverse proxy:
+
+```typescript
+NestTrafficDeskModule.register({
+  enableUi: false,
+  enableWebsocket: false,
+});
+```
 
 ---
 
@@ -256,7 +362,7 @@ The data endpoint supports the following query parameters for server-side filter
       "id": "01HXYZ...",
       "direction": "incoming",
       "correlationId": "abc-123",
-      "timestamp": "2025-04-15T10:30:00.000Z",
+      "timestamp": "2026-04-15T10:30:00.000Z",
       "method": "POST",
       "path": "/api/users",
       "statusCode": 201,
@@ -281,7 +387,7 @@ The module emits two events on the configured Socket.IO namespace.
 | `traffic:snapshot` | `TrafficLogEntry[]` | Full current log emitted to a client immediately on connect. |
 | `traffic:new` | `TrafficLogEntry` | Emitted to all connected clients each time a new entry is logged. |
 | `console:snapshot` | `ConsoleLogEntry[]` | Full current console log buffer emitted immediately on connect. |
-| `console:new` | `ConsoleLogEntry` | Emitted each time a new console message is intercepted. |
+| `console:new` | `ConsoleLogEntry` | Emitted for each intercepted `console` call and for `uncaughtException` / `unhandledRejection` when `captureRuntimeErrors` is enabled. Check `context` for process-level events. |
 
 The dashboard handles reconnection automatically with exponential backoff and displays a live connection status indicator.
 
@@ -300,6 +406,7 @@ import {
   TrafficFilterQuery,
   TrafficLogStore,
   FileTrafficLogStore,
+  ConsoleLogEntry,
 } from 'nest-traffic-desk';
 ```
 
