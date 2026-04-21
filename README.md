@@ -13,6 +13,8 @@ A plug-and-play NestJS module that captures every inbound and outbound HTTP requ
 
 `nest-traffic-desk` registers a global interceptor, a REST data endpoint, and a WebSocket gateway in your NestJS app. A built-in React SPA (served by Nest itself) connects to the WebSocket and renders an inspectable, filterable log of all HTTP traffic in real time.
 
+![Traffic Desk dashboard](assets/screenshots/Screenshot%202026-04-21%20200530.jpg)
+
 - **Key capabilities**
 
 - **Live HTTP stream**: Real-time request/response monitoring via WebSockets.
